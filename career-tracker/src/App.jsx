@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 
 import {
 signInWithGoogle as signIn,
@@ -8,46 +8,184 @@ saveData,
 loadData
 } from "./firebase";
 
-const uid = () => Math.random().toString(36).slice(2, 9);
+const DEFAULT_DATA = {
+goals: []
+};
 
-const pad = (n) => String(n).padStart(2, "0");
+export default function App() {
 
-function fmtTimer(s) {
-s = Math.max(0, Math.floor(s));
+const [user, setUser] = useState(null);
 
-const h = Math.floor(s / 3600);
-const m = Math.floor((s % 3600) / 60);
-const sec = s % 60;
+const [data, setData] = useState(DEFAULT_DATA);
 
-return h > 0
-? `${pad(h)}:${pad(m)}:${pad(sec)}`
-: `${pad(m)}:${pad(sec)}`;
+const [text, setText] = useState("");
+
+const [sync, setSync] = useState("idle");
+
+useEffect(() => {
+
+```
+const unsub = onAuth(async (u) => {
+
+  setUser(u);
+
+  if (!u) return;
+
+  try {
+
+    const d = await loadData(u.uid);
+
+    if (d) {
+      setData(d);
+    }
+
+  } catch (e) {
+    console.error(e);
+  }
+
+});
+
+return () => unsub();
+```
+
+}, []);
+
+useEffect(() => {
+
+```
+if (!user) return;
+
+const t = setTimeout(async () => {
+
+  try {
+
+    setSync("saving");
+
+    await saveData(
+      user.uid,
+      JSON.parse(JSON.stringify(data))
+    );
+
+    setSync("saved");
+
+  } catch (e) {
+
+    console.error(e);
+
+    setSync("error");
+  }
+
+}, 500);
+
+return () => clearTimeout(t);
+```
+
+}, [data, user]);
+
+function addGoal() {
+
+```
+if (!text.trim()) return;
+
+setData(prev => ({
+  ...prev,
+  goals: [
+    ...prev.goals,
+    {
+      id: Date.now(),
+      title: text
+    }
+  ]
+}));
+
+setText("");
+```
+
 }
 
-function fmtHuman(s) {
-s = Math.floor(s || 0);
+if (!user) {
 
-if (!s) return "—";
+```
+return (
+  <div
+    style={{
+      padding: 40,
+      fontFamily: "sans-serif"
+    }}
+  >
+    <h1>Career Tracker</h1>
 
-const h = Math.floor(s / 3600);
-const m = Math.floor((s % 3600) / 60);
+    <button onClick={signIn}>
+      Login with Google
+    </button>
+  </div>
+);
+```
 
-return h > 0
-? `${h}h ${m}m`
-: m > 0
-? `${m}m`
-: `${s}s`;
 }
 
-const COLORS = [
-"#3B82F6",
-"#10B981",
-"#F59E0B",
-"#EF4444",
-"#8B5CF6",
-"#EC4899",
-"#06B6D4",
-"#84CC16",
-"#F97316",
-"#6366F1"
-];
+return (
+<div
+style={{
+padding: 20,
+fontFamily: "sans-serif"
+}}
+>
+
+```
+  <div
+    style={{
+      display: "flex",
+      gap: 10,
+      marginBottom: 20
+    }}
+  >
+    <button onClick={logOut}>
+      Logout
+    </button>
+
+    <div>
+      Sync: {sync}
+    </div>
+  </div>
+
+  <h2>Goals</h2>
+
+  <div
+    style={{
+      display: "flex",
+      gap: 10,
+      marginBottom: 20
+    }}
+  >
+    <input
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      placeholder="New Goal"
+    />
+
+    <button onClick={addGoal}>
+      Add
+    </button>
+  </div>
+
+  {data.goals.map(goal => (
+
+    <div
+      key={goal.id}
+      style={{
+        padding: 10,
+        marginBottom: 10,
+        border: "1px solid #ccc"
+      }}
+    >
+      {goal.title}
+    </div>
+
+  ))}
+
+</div>
+```
+
+);
+}

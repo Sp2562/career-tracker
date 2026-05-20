@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { auth, db, googleProvider, signInWithGoogle, logOut, onAuth, saveData, loadData } from "./firebase.js";
 
-// ─── DATA ─────────────────────────────────────────────────────────────────────
-const LEVELS = [
+// ─── INITIAL DATA ─────────────────────────────────────────────────────────────
+const INITIAL_LEVELS = [
   {
     id:0, tag:"LVL 0", color:"#52525B", light:"#F4F4F5", title:"Foundation", subtitle:"Already completed",
     categories:[
@@ -144,7 +144,10 @@ const LEVELS = [
   },
 ];
 
-const ALL_TASKS = LEVELS.flatMap(l => l.categories.flatMap(c => c.tasks));
+const PRESET_COLORS = [
+  "#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", 
+  "#EC4899", "#06B6D4", "#84CC16", "#F97316", "#6366F1"
+];
 
 function pad(n){ return String(n).padStart(2,"0"); }
 function fmtTimer(s){
@@ -170,12 +173,25 @@ export default function App(){
   const [activeTimer, setActiveTimer] = useState(null);
   const [timerStart, setTimerStart] = useState(null);
   const [elapsed, setElapsed] = useState(0);
-  const [page, setPage] = useState("tasks");
+  const [page, setPage] = useState("track"); // track | edit | stats
   const [openLv, setOpenLv] = useState({1:true});
-  const [syncStatus, setSyncStatus] = useState("idle"); // idle | saving | saved | error
+  const [syncStatus, setSyncStatus] = useState("idle"); 
   const [isDarkMode, setIsDarkMode] = useState(true);
+  
+  // Custom categories state initialized from presets
+  const [customLevels, setCustomLevels] = useState(INITIAL_LEVELS);
+  
+  // Custom inputs for management screen
+  const [newCatName, setNewCatName] = useState("");
+  const [selectedCatColor, setSelectedCatColor] = useState(PRESET_COLORS[0]);
+  const [activeLevelEditId, setActiveLevelEditId] = useState(1); // Default to dynamic edits in Lvl 1
+  const [newTaskNames, setNewTaskNames] = useState({}); // mapped by levelId-categoryName
+
   const intervalRef = useRef(null);
   const saveTimeout = useRef(null);
+
+  // Get active flattened tasks list dynamically
+  const allTasksList = customLevels.flatMap(l => l.categories.flatMap(c => c.tasks));
 
   // auth listener
   useEffect(()=>{
@@ -189,10 +205,11 @@ export default function App(){
             setTimes(data.times||{});
             setOpenLv(data.openLv||{1:true});
             if(data.isDarkMode !== undefined) setIsDarkMode(data.isDarkMode);
+            if(data.customLevels) setCustomLevels(data.customLevels);
           } else {
             // first login — mark level 0 done
             const d={};
-            LEVELS[0].categories.forEach(c=>c.tasks.forEach(t=>{ d[t.id]=true; }));
+            INITIAL_LEVELS[0].categories.forEach(c=>c.tasks.forEach(t=>{ d[t.id]=true; }));
             setDone(d);
           }
         } catch(e){}
@@ -212,13 +229,13 @@ export default function App(){
     return ()=> clearInterval(intervalRef.current);
   },[activeTimer, timerStart]);
 
-  const persist = useCallback((d, t, ol, dm)=>{
+  const persist = useCallback((d, t, ol, dm, cl)=>{
     if(!user) return;
     if(saveTimeout.current) clearTimeout(saveTimeout.current);
     setSyncStatus("saving");
     saveTimeout.current = setTimeout(async()=>{
       try {
-        await saveData(user.uid, { done:d, times:t, openLv:ol, isDarkMode:dm });
+        await saveData(user.uid, { done:d, times:t, openLv:ol, isDarkMode:dm, customLevels:cl });
         setSyncStatus("saved");
         setTimeout(()=> setSyncStatus("idle"), 2000);
       } catch(e){ setSyncStatus("error"); }
@@ -236,7 +253,7 @@ export default function App(){
       const secs = Math.floor((Date.now()-timerStart)/1000);
       setTimes(prev=>{
         const next={...prev,[activeTimer]:(prev[activeTimer]||0)+secs};
-        persist(done,next,openLv,isDarkMode);
+        persist(done,next,openLv,isDarkMode,customLevels);
         return next;
       });
     }
@@ -249,7 +266,7 @@ export default function App(){
     const secs = Math.floor((Date.now()-timerStart)/1000);
     setTimes(prev=>{
       const next={...prev,[tid]:(prev[tid]||0)+secs};
-      persist(done,next,openLv,isDarkMode);
+      persist(done,next,openLv,isDarkMode,customLevels);
       return next;
     });
     setActiveTimer(null);
@@ -260,7 +277,7 @@ export default function App(){
     if(activeTimer===tid) stopTimer(tid);
     setDone(prev=>{
       const next={...prev,[tid]:!prev[tid]};
-      persist(next,times,openLv,isDarkMode);
+      persist(next,times,openLv,isDarkMode,customLevels);
       return next;
     });
   };
@@ -268,22 +285,82 @@ export default function App(){
   const toggleLv = (id)=>{
     setOpenLv(prev=>{
       const next={...prev,[id]:!prev[id]};
-      persist(done,times,next,isDarkMode);
+      persist(done,times,next,isDarkMode,customLevels);
       return next;
     });
   };
 
   const toggleTheme = (darkOpt) => {
     setIsDarkMode(darkOpt);
-    persist(done,times,openLv,darkOpt);
+    persist(done,times,openLv,darkOpt,customLevels);
   };
 
-  const totalDone = ALL_TASKS.filter(t=>done[t.id]).length;
-  const totalTasks = ALL_TASKS.length;
-  const pct = Math.round((totalDone/totalTasks)*100);
-  const totalSecs = ALL_TASKS.reduce((a,t)=>a+getLive(t.id),0);
+  // ─── EDIT & CUSTOM CATEGORY MANIPULATION FUNCTIONS ──────────────────
+  const handleCreateCategory = () => {
+    if(!newCatName.trim()) return;
+    const updated = customLevels.map(lvl => {
+      if(lvl.id === activeLevelEditId) {
+        return {
+          ...lvl,
+          categories: [...lvl.categories, { name: newCatName.trim(), tasks: [] }]
+        };
+      }
+      return lvl;
+    });
+    setCustomLevels(updated);
+    setNewCatName("");
+    persist(done,times,openLv,isDarkMode,updated);
+  };
 
-  // Theme Dynamic Values
+  const handleAddTask = (lvlId, catName) => {
+    const taskInputKey = `${lvlId}-${catName}`;
+    const taskText = newTaskNames[taskInputKey];
+    if(!taskText || !taskText.trim()) return;
+
+    const newTaskId = `custom-${Date.now()}`;
+    const updated = customLevels.map(lvl => {
+      if(lvl.id === lvlId) {
+        return {
+          ...lvl,
+          categories: lvl.categories.map(cat => {
+            if(cat.name === catName) {
+              return {
+                ...cat,
+                tasks: [...cat.tasks, { id: newTaskId, name: taskText.trim() }]
+              };
+            }
+            return cat;
+          })
+        };
+      }
+      return lvl;
+    });
+
+    setCustomLevels(updated);
+    setNewTaskNames(prev => ({ ...prev, [taskInputKey]: "" }));
+    persist(done,times,openLv,isDarkMode,updated);
+  };
+
+  const handleDeleteCategory = (lvlId, catName) => {
+    const updated = customLevels.map(lvl => {
+      if(lvl.id === lvlId) {
+        return {
+          ...lvl,
+          categories: lvl.categories.filter(cat => cat.name !== catName)
+        };
+      }
+      return lvl;
+    });
+    setCustomLevels(updated);
+    persist(done,times,openLv,isDarkMode,updated);
+  };
+
+  const totalDone = allTasksList.filter(t=>done[t.id]).length;
+  const totalTasks = allTasksList.length;
+  const pct = totalTasks ? Math.round((totalDone/totalTasks)*100) : 0;
+  const totalSecs = allTasksList.reduce((a,t)=>a+getLive(t.id),0);
+
+  // Theme Dynamic Style Configurations
   const bgMain = isDarkMode ? "#0A0A0A" : "#FFFFFF";
   const bgCard = isDarkMode ? "#18181B" : "#FAFAFA";
   const bgSubCard = isDarkMode ? "#111113" : "#F4F4F5";
@@ -320,12 +397,12 @@ export default function App(){
     );
   }
 
-  // ── MAIN APP ──
+  // ── MAIN APP LAYOUT ──
   return (
     <div style={{fontFamily:"DM Mono, monospace",background:bgMain,minHeight:"100vh",color:textPrimary,transition:"background 0.2s, color 0.2s"}}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
 
-      {/* TOP BAR */}
+      {/* TOP NAVBAR (Includes track, edit, stats view toggles) */}
       <div style={{position:"sticky",top:0,zIndex:50,background:bgMain,borderBottom:`1px solid ${borderCol}`,padding:"10px 16px",display:"flex",alignItems:"center",gap:10}}>
         <div style={{flex:1}}>
           <div style={{fontSize:13,fontWeight:500,color:textPrimary}}>track.it</div>
@@ -337,14 +414,14 @@ export default function App(){
           </div>
         </div>
         <div style={{display:"flex",background:bgCard,borderRadius:8,border:`1px solid ${borderCol}`,overflow:"hidden"}}>
-          {["tasks","stats"].map(p=>(
-            <button key={p} onClick={()=>setPage(p)} style={{fontSize:11,padding:"5px 14px",background:page===p?borderCol:"transparent",color:page===p?textPrimary:textSecondary,border:"none",cursor:"pointer",fontFamily:"inherit",letterSpacing:"0.04em"}}>{p}</button>
+          {["track","edit","stats"].map(p=>(
+            <button key={p} onClick={()=>setPage(p)} style={{fontSize:11,padding:"5px 14px",background:page===p?borderCol:"transparent",color:page===p?textPrimary:textSecondary,border:"none",cursor:"pointer",fontFamily:"inherit",letterSpacing:"0.04em",textTransform:"lowercase"}}>{p}</button>
           ))}
         </div>
         <button onClick={logOut} style={{fontSize:11,padding:"5px 10px",background:"transparent",border:`1px solid ${borderCol}`,borderRadius:7,color:textSecondary,cursor:"pointer",fontFamily:"inherit"}}>sign out</button>
       </div>
 
-      {/* STATS STRIP */}
+      {/* GLOBAL STATS STRIP */}
       <div style={{padding:"14px 16px 0"}}>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
           {[["done",`${totalDone}/${totalTasks}`],["progress",`${pct}%`],["time",fmtHuman(totalSecs)],["xp",`${totalDone*100}`]].map(([label,val])=>(
@@ -359,9 +436,9 @@ export default function App(){
         </div>
       </div>
 
-      {/* ACTIVE TIMER BANNER */}
-      {activeTimer&&(()=>{
-        const t=ALL_TASKS.find(t=>t.id===activeTimer);
+      {/* ACTIVE RUNNING TIMER */}
+      {activeTimer&&(()=> {
+        const t=allTasksList.find(t=>t.id===activeTimer);
         return(
           <div style={{margin:"0 16px 12px",background:isDarkMode?"#052e16":"#DCFCE7",border:"1px solid #22C55E",borderRadius:8,padding:"8px 12px",display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:8,height:8,borderRadius:"50%",background:"#22C55E",animation:"pulse 1s infinite"}}/>
@@ -374,12 +451,69 @@ export default function App(){
 
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}`}</style>
 
-      {page==="tasks"
-        ? <TasksPage levels={LEVELS} done={done} getLive={getLive} activeTimer={activeTimer} toggleDone={toggleDone} startTimer={startTimer} stopTimer={stopTimer} openLv={openLv} toggleLv={toggleLv} isDarkMode={isDarkMode} bgCard={bgCard} bgSubCard={bgSubCard} borderCol={borderCol} textPrimary={textPrimary} textSecondary={textSecondary} textMuted={textMuted}/>
-        : <StatsPage done={done} getLive={getLive} totalSecs={totalSecs} isDarkMode={isDarkMode} bgCard={bgCard} bgSubCard={bgSubCard} borderCol={borderCol} textPrimary={textPrimary} textSecondary={textSecondary} textMuted={textMuted}/>
-      }
+      {/* RENDER PAGES BASED ON NAVIGATION */}
+      {page === "track" && (
+        <TasksPage customLevels={customLevels} done={done} getLive={getLive} activeTimer={activeTimer} toggleDone={toggleDone} startTimer={startTimer} stopTimer={stopTimer} openLv={openLv} toggleLv={toggleLv} isDarkMode={isDarkMode} bgCard={bgCard} bgSubCard={bgSubCard} borderCol={borderCol} textPrimary={textPrimary} textSecondary={textSecondary} textMuted={textMuted} newTaskNames={newTaskNames} setNewTaskNames={setNewTaskNames} handleAddTask={handleAddTask}/>
+      )}
 
-      {/* PRESETS & THEME SETTINGS BLOCK (Matched exactly to previous build mockup) */}
+      {page === "edit" && (
+        <div style={{padding:"0 16px 20px"}}>
+          {/* MANAGE / CREATE CATEGORY PANEL */}
+          <div style={{border:`1px solid ${borderCol}`, borderRadius:10, background:bgSubCard, padding:"16px", marginBottom:20}}>
+            <div style={{fontSize:10, color:textMuted, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:12}}>Manage Categories</div>
+            
+            <div style={{display:"flex", flexDirection:"column", gap:10, marginBottom:16}}>
+              <input type="text" placeholder="e.g. Fitness, Arabic, Side project..." value={newCatName} onChange={(e)=>setNewCatName(e.target.value)} style={{background:bgCard, border:`1px solid ${borderCol}`, borderRadius:6, padding:"10px", fontSize:12, color:textPrimary, fontFamily:"inherit", outline:"none", width:"100%"}} />
+              
+              <div style={{display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
+                <span style={{fontSize:11, color:textSecondary, marginRight:4}}>Target Level:</span>
+                {[0, 1, 2, 3, 4].map(lNum => (
+                  <button key={lNum} onClick={() => setActiveLevelEditId(lNum)} style={{fontFamily:"inherit", fontSize:11, padding:"3px 8px", borderRadius:4, border:`1px solid ${activeLevelEditId===lNum ? "#1D4ED8":borderCol}`, background: activeLevelEditId===lNum ? "#1D4ED8":"transparent", color: activeLevelEditId===lNum ? "#FFF":textSecondary, cursor:"pointer"}}>LVL {lNum}</button>
+                ))}
+              </div>
+
+              {/* Mockup Dot Color selector presets */}
+              <div style={{display:"flex", gap:8, alignItems:"center", marginTop:6, flexWrap:"wrap"}}>
+                <span style={{fontSize:11, color:textSecondary}}>Color:</span>
+                {PRESET_COLORS.map(c => (
+                  <div key={c} onClick={() => setSelectedCatColor(c)} style={{width:18, height:18, borderRadius:"50%", background:c, cursor:"pointer", border:selectedCatColor===c ? `2px solid ${textPrimary}` : `1px solid transparent`, transform: selectedCatColor===c ? "scale(1.15)":"scale(1)", transition:"all 0.1s"}} />
+                ))}
+              </div>
+            </div>
+
+            <button onClick={handleCreateCategory} style={{width:"100%", background:"#10B981", border:"none", borderRadius:6, padding:"10px", color:"#FFF", fontSize:12, fontWeight:500, cursor:"pointer", fontFamily:"inherit"}}>Create Category</button>
+          </div>
+
+          {/* ACTIVE CATEGORIES LIST TO REMOVE/EDIT */}
+          <div style={{display:"flex", flexDirection:"column", gap:10}}>
+            {customLevels.map(lvl => (
+              <div key={lvl.id}>
+                {lvl.categories.length > 0 && (
+                  <div style={{fontSize:11, fontWeight:500, color: lvl.color, marginBottom:6, textTransform:"uppercase"}}>{lvl.tag} — {lvl.title}</div>
+                )}
+                <div style={{display:"flex", flexDirection:"column", gap:6, marginBottom:12}}>
+                  {lvl.categories.map(cat => (
+                    <div key={cat.name} style={{display:"flex", alignItems:"center", justifyContent:"space-between", background:bgCard, border:`1px solid ${borderCol}`, borderRadius:8, padding:"10px 14px"}}>
+                      <div style={{display:"flex", alignItems:"center", gap:10}}>
+                        <div style={{width:10, height:10, borderRadius:"50%", background: lvl.color}} />
+                        <span style={{fontSize:13, color:textPrimary}}>{cat.name}</span>
+                        <span style={{fontSize:10, color:textMuted}}>({cat.tasks.length} tasks)</span>
+                      </div>
+                      <button onClick={() => handleDeleteCategory(lvl.id, cat.name)} style={{background:"transparent", border:`1px solid #EF4444`, color:"#EF4444", fontSize:11, padding:"2px 8px", borderRadius:4, cursor:"pointer", fontFamily:"inherit"}}>edit / delete</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {page === "stats" && (
+        <StatsPage allTasksList={allTasksList} done={done} getLive={getLive} totalSecs={totalSecs} isDarkMode={isDarkMode} bgCard={bgCard} bgSubCard={bgSubCard} borderCol={borderCol} textPrimary={textPrimary} textSecondary={textSecondary} textMuted={textMuted} customLevels={customLevels}/>
+      )}
+
+      {/* SYSTEM CONFIGURATION BLOCK */}
       <div style={{padding:"0 16px 40px", marginTop: "20px"}}>
         <div style={{border:`1px solid ${borderCol}`, borderRadius:10, background:bgSubCard, overflow:"hidden", padding:"16px"}}>
           <h3 style={{fontSize:14, fontWeight:500, color:textPrimary, marginBottom:12}}>Settings</h3>
@@ -402,11 +536,11 @@ export default function App(){
   );
 }
 
-// ─── TASKS PAGE ───────────────────────────────────────────────────────────────
-function TasksPage({levels,done,getLive,activeTimer,toggleDone,startTimer,stopTimer,openLv,toggleLv,isDarkMode,bgCard,bgSubCard,borderCol,textPrimary,textSecondary,textMuted}){
+// ─── TRACK/TASKS SUB-PAGE ENGINE ───────────────────────────────────────────────
+function TasksPage({customLevels,done,getLive,activeTimer,toggleDone,startTimer,stopTimer,openLv,toggleLv,isDarkMode,bgCard,bgSubCard,borderCol,textPrimary,textSecondary,textMuted,newTaskNames,setNewTaskNames,handleAddTask}){
   return(
     <div style={{padding:"0 16px 10px"}}>
-      {levels.map(lv=>{
+      {customLevels.map(lv=>{
         const allT=lv.categories.flatMap(c=>c.tasks);
         const lvDone=allT.filter(t=>done[t.id]).length;
         const lvPct=allT.length?Math.round(lvDone/allT.length*100):0;
@@ -435,14 +569,22 @@ function TasksPage({levels,done,getLive,activeTimer,toggleDone,startTimer,stopTi
               <div style={{padding:"10px 14px 14px"}}>
                 {lv.categories.map(cat=>{
                   const catDone=cat.tasks.filter(t=>done[t.id]).length;
+                  const inputKey = `${lv.id}-${cat.name}`;
                   return(
-                    <div key={cat.name} style={{marginBottom:12}}>
+                    <div key={cat.name} style={{marginBottom:16}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
                         <span style={{fontSize:10,color:textMuted,letterSpacing:"0.08em",textTransform:"uppercase",whiteSpace:"nowrap"}}>{cat.name}</span>
                         <span style={{fontSize:10,color:textSecondary}}>{catDone}/{cat.tasks.length}</span>
                         <div style={{flex:1,height:1,background:borderCol}}/>
                       </div>
-                      <div style={{display:"flex",flexDirection:"column",gap:4}}>
+
+                      {/* Inline Task Adder Box */}
+                      <div style={{display:"flex", gap:6, marginBottom:8}}>
+                        <input type="text" placeholder="+ add task" value={newTaskNames[inputKey] || ""} onChange={(e) => setNewTaskNames({...newTaskNames, [inputKey]: e.target.value})} onKeyDown={(e) => e.key === 'Enter' && handleAddTask(lv.id, cat.name)} style={{flex:1, background:bgCard, border:`1px solid ${borderCol}`, borderRadius:6, padding:"5px 10px", fontSize:11, color:textPrimary, fontFamily:"inherit", outline:"none"}} />
+                        <button onClick={() => handleAddTask(lv.id, cat.name)} style={{background:currentLvColor, border:"none", borderRadius:6, padding:"0 12px", color:"#FFF", fontSize:11, cursor:"pointer", fontFamily:"inherit"}}>+</button>
+                      </div>
+
+                      <div style={{display:"flex", flexDirection:"column", gap:4}}>
                         {cat.tasks.map(t=>{
                           const isDone=!!done[t.id];
                           const isActive=activeTimer===t.id;
@@ -475,16 +617,16 @@ function TasksPage({levels,done,getLive,activeTimer,toggleDone,startTimer,stopTi
   );
 }
 
-// ─── STATS PAGE ───────────────────────────────────────────────────────────────
-function StatsPage({done,getLive,totalSecs,isDarkMode,bgCard,bgSubCard,borderCol,textPrimary,textSecondary,textMuted}){
-  const topTasks=[...ALL_TASKS].map(t=>({...t,secs:getLive(t.id)})).filter(t=>t.secs>0).sort((a,b)=>b.secs-a.secs).slice(0,8);
+// ─── STATS SUB-PAGE ENGINE ───────────────────────────────────────────────────────────────
+function StatsPage({allTasksList,done,getLive,totalSecs,isDarkMode,bgCard,bgSubCard,borderCol,textPrimary,textSecondary,textMuted,customLevels}){
+  const topTasks=[...allTasksList].map(t=>({...t,secs:getLive(t.id)})).filter(t=>t.secs>0).sort((a,b)=>b.secs-a.secs).slice(0,8);
   const maxSecs=topTasks[0]?.secs||1;
 
   return(
     <div style={{padding:"0 16px 10px"}}>
       <div style={{marginBottom:16}}>
         <div style={{fontSize:10,color:textMuted,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>Level breakdown</div>
-        {LEVELS.map(lv=>{
+        {customLevels.map(lv=>{
           const allT=lv.categories.flatMap(c=>c.tasks);
           const lvDone=allT.filter(t=>done[t.id]).length;
           const lvSecs=allT.reduce((a,t)=>a+getLive(t.id),0);
@@ -521,12 +663,12 @@ function StatsPage({done,getLive,totalSecs,isDarkMode,bgCard,bgSubCard,borderCol
           <div style={{background:bgCard,border:`1px solid ${borderCol}`,borderRadius:8,padding:"10px 12px",display:"flex",flexDirection:"column",gap:8}}>
             {topTasks.map(t=>{
               const barW=Math.round((t.secs/maxSecs)*100);
-              const originLv = LEVELS.find(l=>l.categories.some(c=>c.tasks.some(tk=>tk.id===t.id)));
+              const originLv = customLevels.find(l=>l.categories.some(c=>c.tasks.some(tk=>tk.id===t.id)));
               const lvColor= originLv ? (isDarkMode ? originLv.color : (originLv.id === 0 ? "#71717A" : originLv.color)) : "#6D28D9";
               return(
                 <div key={t.id}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                    <span style={{fontSize:11,color:done[t.id]?textMuted:textSecondary,textDecoration:done[t.id]?"line-through":"none",maxWidth:"75%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.name}</span>
+                    <span style={{fontSize:11,color:done[t.id]?textMuted:textPrimary,textDecoration:done[t.id]?"line-through":"none",maxWidth:"75%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.name}</span>
                     <span style={{fontSize:11,color:textSecondary,fontVariantNumeric:"tabular-nums"}}>{fmtHuman(t.secs)}</span>
                   </div>
                   <div style={{height:3,background:borderCol,borderRadius:2}}>
@@ -542,7 +684,7 @@ function StatsPage({done,getLive,totalSecs,isDarkMode,bgCard,bgSubCard,borderCol
       <div style={{background:bgCard,border:`1px solid ${borderCol}`,borderRadius:8,padding:"12px 14px"}}>
         <div style={{fontSize:10,color:textMuted,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>Total</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          {[["Total tasks",ALL_TASKS.length],["Completed",ALL_TASKS.filter(t=>done[t.id]).length],["Time logged",fmtHuman(totalSecs)],["XP earned",ALL_TASKS.filter(t=>done[t.id]).length*100]].map(([k,v])=>(
+          {[["Total tasks",allTasksList.length],["Completed",allTasksList.filter(t=>done[t.id]).length],["Time logged",fmtHuman(totalSecs)],["XP earned",allTasksList.filter(t=>done[t.id]).length*100]].map(([k,v])=>(
             <div key={k} style={{background:bgSubCard,border:`1px solid ${borderCol}`,borderRadius:6,padding:"8px 10px"}}>
               <div style={{fontSize:10,color:textMuted,marginBottom:2}}>{k}</div>
               <div style={{fontSize:15,fontWeight:500,color:textPrimary}}>{v}</div>

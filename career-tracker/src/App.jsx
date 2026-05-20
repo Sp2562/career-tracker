@@ -1,696 +1,607 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { auth, db, googleProvider, signInWithGoogle, logOut, onAuth, saveData, loadData } from "./firebase.js";
+import { initializeApp } from "firebase/app";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { getFirestore, doc, setDoc, getDoc } from "firebase/firestore";
 
-// ─── INITIAL DATA ─────────────────────────────────────────────────────────────
-const INITIAL_LEVELS = [
-  {
-    id:0, tag:"LVL 0", color:"#52525B", light:"#F4F4F5", title:"Foundation", subtitle:"Already completed",
-    categories:[
-      { name:"TIA Portal", tasks:[
-        {id:"l0t0",name:"S7-1200 / 1500 programming"},
-        {id:"l0t1",name:"S7-300 / 400 programming"},
-        {id:"l0t2",name:"Ladder logic"},
-        {id:"l0t3",name:"SCL programming"},
-      ]},
-      { name:"HMI / SCADA", tasks:[
-        {id:"l0t4",name:"WinCC HMI screens and navigation"},
-        {id:"l0t5",name:"Alarms and trends in WinCC"},
-        {id:"l0t6",name:"VBScript in WinCC runtime"},
-      ]},
-      { name:"Programming basics", tasks:[
-        {id:"l0t7",name:"Basic Python — loops, functions, files"},
-        {id:"l0t8",name:"Basic SQL — SELECT, INSERT, UPDATE"},
-        {id:"l0t9",name:"C intermediate — structs, pointers, state machine"},
-      ]},
-    ]
-  },
-  {
-    id:1, tag:"LVL 1", color:"#1D4ED8", light:"#EFF6FF", title:"Python + SQL Power User", subtitle:"Months 1 – 3",
-    categories:[
-      { name:"Tools Setup", tasks:[
-        {id:"l1t0",name:"Install Git on your computer"},
-        {id:"l1t1",name:"Create GitHub account"},
-        {id:"l1t2",name:"Push first project to GitHub"},
-      ]},
-      { name:"Python Skills", tasks:[
-        {id:"l1t3",name:"pandas — read and filter CSV / Excel files"},
-        {id:"l1t4",name:"pandas — group by and calculate averages"},
-        {id:"l1t5",name:"pandas — export results to Excel"},
-        {id:"l1t6",name:"sqlite3 — connect Python to database"},
-        {id:"l1t7",name:"Read and write database rows from Python"},
-      ]},
-      { name:"OPC-UA", tasks:[
-        {id:"l1t8",name:"Enable OPC-UA server on PLC in TIA Portal"},
-        {id:"l1t9",name:"Install opcua library in Python"},
-        {id:"l1t10",name:"Connect Python to PLC via OPC-UA"},
-        {id:"l1t11",name:"Read live tag values from Python"},
-        {id:"l1t12",name:"Build loop: read tags every 30 seconds"},
-      ]},
-      { name:"Boss Project", tasks:[
-        {id:"l1t13",name:"Read 5 PLC tags → save to database → daily Excel report"},
-        {id:"l1t14",name:"Push project to GitHub with README"},
-      ]},
-    ]
-  },
-  {
-    id:2, tag:"LVL 2", color:"#0F766E", light:"#F0FDF9", title:"TIA Openness", subtitle:"Months 4 – 8",
-    categories:[
-      { name:"C# Basics", tasks:[
-        {id:"l2t0",name:"Install Visual Studio Community"},
-        {id:"l2t1",name:"Write a class with properties"},
-        {id:"l2t2",name:"Use a list and loop through it"},
-        {id:"l2t3",name:"Read a CSV file in C#"},
-        {id:"l2t4",name:"Handle errors with try-catch"},
-      ]},
-      { name:"TIA Openness API", tasks:[
-        {id:"l2t5",name:"Add Siemens.Engineering.dll reference"},
-        {id:"l2t6",name:"Open a TIA project from C# code"},
-        {id:"l2t7",name:"Loop through existing PLC tags and print them"},
-        {id:"l2t8",name:"Create a new PLC tag from code"},
-        {id:"l2t9",name:"Compile TIA project from code"},
-      ]},
-      { name:"Supporting Skills", tasks:[
-        {id:"l2t10",name:"Parse XML file in Python"},
-        {id:"l2t11",name:"Read and write JSON file in Python"},
-        {id:"l2t12",name:"WinCC OA — dpGet and dpSet in CTRL script"},
-        {id:"l2t13",name:"WinCC OA — dynamic color based on datapoint value"},
-      ]},
-      { name:"Boss Project", tasks:[
-        {id:"l2t14",name:"Excel file → auto-generate 50 tags + HMI screens"},
-        {id:"l2t15",name:"Push project to GitHub with README"},
-      ]},
-    ]
-  },
-  {
-    id:3, tag:"LVL 3", color:"#B45309", light:"#FFFBEB", title:"MES & Dashboards", subtitle:"Months 9 – 14",
-    categories:[
-      { name:"APIs", tasks:[
-        {id:"l3t0",name:"Install FastAPI and uvicorn"},
-        {id:"l3t1",name:"Build a route that returns JSON data"},
-        {id:"l3t2",name:"Build a POST route that saves to database"},
-        {id:"l3t3",name:"Expose live PLC tag values through the API"},
-      ]},
-      { name:"Grafana Dashboards", tasks:[
-        {id:"l3t4",name:"Install Grafana locally"},
-        {id:"l3t5",name:"Connect Grafana to SQL database"},
-        {id:"l3t6",name:"Build a time series chart panel"},
-        {id:"l3t7",name:"Build a gauge panel showing OEE"},
-        {id:"l3t8",name:"Set auto-refresh every 30 seconds"},
-      ]},
-      { name:"MES Knowledge", tasks:[
-        {id:"l3t9",name:"Learn OEE formula: Availability × Performance × Quality"},
-        {id:"l3t10",name:"Design database schema for production data"},
-        {id:"l3t11",name:"Write Python script that calculates OEE"},
-      ]},
-      { name:"Docker", tasks:[
-        {id:"l3t12",name:"Install Docker Desktop"},
-        {id:"l3t13",name:"Run hello-world container"},
-        {id:"l3t14",name:"Write a Dockerfile for your Python app"},
-        {id:"l3t15",name:"Build and run your app inside Docker"},
-      ]},
-      { name:"Boss Project", tasks:[
-        {id:"l3t16",name:"Full pipeline: PLC → OPC-UA → Python → SQL → Grafana"},
-        {id:"l3t17",name:"Wrap everything in Docker"},
-        {id:"l3t18",name:"Push to GitHub with screenshots and README"},
-      ]},
-    ]
-  },
-  {
-    id:4, tag:"LVL 4", color:"#6D28D9", light:"#F5F3FF", title:"Get the Job", subtitle:"Month 14+",
-    categories:[
-      { name:"Portfolio", tasks:[
-        {id:"l4t0",name:"3 boss projects on GitHub with clean code"},
-        {id:"l4t1",name:"README with screenshot for each project"},
-        {id:"l4t2",name:"GitHub profile page set up with pinned projects"},
-      ]},
-      { name:"Job Search", tasks:[
-        {id:"l4t3",name:"Search: Automation Software Developer"},
-        {id:"l4t4",name:"Search: MES Engineer"},
-        {id:"l4t5",name:"Search: SCADA Developer"},
-        {id:"l4t6",name:"Search: Digital Factory Engineer"},
-        {id:"l4t7",name:"Apply to minimum 10 positions"},
-      ]},
-      { name:"Freelance", tasks:[
-        {id:"l4t8",name:"Create Upwork profile"},
-        {id:"l4t9",name:"Write your niche: TIA Portal automation + factory dashboards"},
-        {id:"l4t10",name:"Complete first small freelance project"},
-      ]},
-      { name:"Community", tasks:[
-        {id:"l4t11",name:"Create account on Siemens SIOS portal"},
-        {id:"l4t12",name:"Answer 5 questions in TIA Portal forum"},
-        {id:"l4t13",name:"Join r/PLC on Reddit"},
-      ]},
-    ]
-  },
-];
+const firebaseConfig = {
+  apiKey: "AIzaSyA207pKFIA-d7S9HdN31-du2CGhbWt6NZQ",
+  authDomain: "roadmap-automation-6e4ad.firebaseapp.com",
+  projectId: "roadmap-automation-6e4ad",
+  storageBucket: "roadmap-automation-6e4ad.firebasestorage.app",
+  messagingSenderId: "1075036356196",
+  appId: "1:1075036356196:web:c5b35497b0428f92d96971"
+};
 
-const PRESET_COLORS = [
-  "#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", 
-  "#EC4899", "#06B6D4", "#84CC16", "#F97316", "#6366F1"
-];
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const gProvider = new GoogleAuthProvider();
+const signIn = () => signInWithPopup(auth, gProvider);
+const logOut = () => signOut(auth);
+const onAuth = (cb) => onAuthStateChanged(auth, cb);
 
-function pad(n){ return String(n).padStart(2,"0"); }
-function fmtTimer(s){
-  s=Math.max(0,Math.floor(s));
-  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
-  if(h>0) return `${pad(h)}:${pad(m)}:${pad(sec)}`;
-  return `${pad(m)}:${pad(sec)}`;
-}
-function fmtHuman(s){
-  s=Math.floor(s);
-  if(s===0) return "—";
-  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);
-  if(h>0) return `${h}h ${m}m`;
-  if(m>0) return `${m}m`;
-  return `${s}s`;
+// Firestore cannot handle deep nested arrays reliably.
+// We serialize the entire data to a JSON string and store it as one field.
+async function saveData(uid, data) {
+  await setDoc(doc(db, "trackerv3", uid), { payload: JSON.stringify(data), ts: Date.now() });
 }
 
-// ─── APP ──────────────────────────────────────────────────────────────────────
-export default function App(){
-  const [user, setUser] = useState(undefined); // undefined = loading
-  const [done, setDone] = useState({});
-  const [times, setTimes] = useState({});
+async function loadData(uid) {
+  // 1. Try latest collection first (JSON payload format)
+  let snap = await getDoc(doc(db, "trackerv3", uid));
+  if (snap.exists() && snap.data().payload) {
+    return JSON.parse(snap.data().payload);
+  }
+
+  // 2. Try users2 (previous version - nested object format)
+  snap = await getDoc(doc(db, "users2", uid));
+  if (snap.exists()) {
+    const d = snap.data();
+    if (d && d.categories && Array.isArray(d.categories) && d.categories.length > 0) {
+      // migrate: save to new collection immediately
+      await setDoc(doc(db, "trackerv3", uid), { payload: JSON.stringify(d), ts: Date.now() });
+      return d;
+    }
+  }
+
+  // 3. Try users (oldest version)
+  snap = await getDoc(doc(db, "users", uid));
+  if (snap.exists()) {
+    const d = snap.data();
+    if (d && d.categories && Array.isArray(d.categories) && d.categories.length > 0) {
+      await setDoc(doc(db, "trackerv3", uid), { payload: JSON.stringify(d), ts: Date.now() });
+      return d;
+    }
+    // old format had done/times/openLv flat structure - cannot migrate, return null
+  }
+
+  return null;
+}
+
+const uid = () => Math.random().toString(36).slice(2, 9);
+const pad = (n) => String(n).padStart(2, "0");
+
+function fmtTimer(s) {
+  s = Math.max(0, Math.floor(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return h > 0 ? `${pad(h)}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;
+}
+
+function fmtHuman(s) {
+  s = Math.floor(s || 0);
+  if (!s) return "—";
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m` : `${s}s`;
+}
+
+const COLORS = ["#3B82F6","#10B981","#F59E0B","#EF4444","#8B5CF6","#EC4899","#06B6D4","#84CC16","#F97316","#6366F1"];
+
+const DEFAULT_DATA = {
+  categories: [
+    {
+      id: "cat1", name: "Automation Career", color: "#3B82F6",
+      levels: [
+        {
+          id: "lv1", name: "Foundation", subtitle: "Already done",
+          tasks: [
+            { id: "t1", name: "TIA Portal S7-1200/1500 programming", done: true, time: 0 },
+            { id: "t2", name: "HMI / WinCC screens and alarms", done: true, time: 0 },
+            { id: "t3", name: "Basic Python — loops, functions, files", done: true, time: 0 },
+            { id: "t4", name: "Basic SQL — SELECT, INSERT, UPDATE", done: true, time: 0 },
+          ]
+        },
+        {
+          id: "lv2", name: "Python + SQL Power User", subtitle: "Months 1–3",
+          tasks: [
+            { id: "t5", name: "Install Git and create GitHub account", done: false, time: 0 },
+            { id: "t6", name: "pandas — read, filter, export Excel/CSV", done: false, time: 0 },
+            { id: "t7", name: "sqlite3 — connect Python to database", done: false, time: 0 },
+            { id: "t8", name: "OPC-UA — read live PLC tags from Python", done: false, time: 0 },
+            { id: "t9", name: "Boss project — OPC-UA pipeline to Excel report", done: false, time: 0 },
+          ]
+        },
+        {
+          id: "lv3", name: "TIA Openness", subtitle: "Months 4–8",
+          tasks: [
+            { id: "t10", name: "C# basics for TIA Openness", done: false, time: 0 },
+            { id: "t11", name: "TIA Openness API — control TIA from code", done: false, time: 0 },
+            { id: "t12", name: "Boss project — auto-generate 50 tags from Excel", done: false, time: 0 },
+          ]
+        },
+        {
+          id: "lv4", name: "MES & Dashboards", subtitle: "Months 9–14",
+          tasks: [
+            { id: "t13", name: "FastAPI — build REST API in Python", done: false, time: 0 },
+            { id: "t14", name: "Grafana — live dashboard from SQL", done: false, time: 0 },
+            { id: "t15", name: "Docker — package and deploy your app", done: false, time: 0 },
+            { id: "t16", name: "Boss project — live OEE dashboard", done: false, time: 0 },
+          ]
+        },
+        {
+          id: "lv5", name: "Get the Job", subtitle: "Month 14+",
+          tasks: [
+            { id: "t17", name: "3 boss projects on GitHub with README", done: false, time: 0 },
+            { id: "t18", name: "Apply to: Automation Software Developer", done: false, time: 0 },
+            { id: "t19", name: "Apply to: MES Engineer", done: false, time: 0 },
+            { id: "t20", name: "Apply to: SCADA Developer", done: false, time: 0 },
+          ]
+        },
+      ]
+    }
+  ],
+  activeCategory: "cat1"
+};
+
+export default function App() {
+  const [user, setUser] = useState(undefined);
+  const [data, setData] = useState(null);
   const [activeTimer, setActiveTimer] = useState(null);
   const [timerStart, setTimerStart] = useState(null);
   const [elapsed, setElapsed] = useState(0);
-  const [page, setPage] = useState("track"); // track | edit | stats
-  const [openLv, setOpenLv] = useState({1:true});
-  const [syncStatus, setSyncStatus] = useState("idle"); 
-  const [isDarkMode, setIsDarkMode] = useState(true);
-  
-  // Custom categories state initialized from presets
-  const [customLevels, setCustomLevels] = useState(INITIAL_LEVELS);
-  
-  // Custom inputs for management screen
-  const [newCatName, setNewCatName] = useState("");
-  const [selectedCatColor, setSelectedCatColor] = useState(PRESET_COLORS[0]);
-  const [activeLevelEditId, setActiveLevelEditId] = useState(1); // Default to dynamic edits in Lvl 1
-  const [newTaskNames, setNewTaskNames] = useState({}); // mapped by levelId-categoryName
-
+  const [page, setPage] = useState("tracker");
+  const [syncStatus, setSyncStatus] = useState("idle");
+  const saveRef = useRef(null);
   const intervalRef = useRef(null);
-  const saveTimeout = useRef(null);
+  const timerRef = useRef({ id: null, start: null });
 
-  // Get active flattened tasks list dynamically
-  const allTasksList = customLevels.flatMap(l => l.categories.flatMap(c => c.tasks));
-
-  // auth listener
-  useEffect(()=>{
-    const unsub = onAuth(async (u)=>{
+  useEffect(() => {
+    return onAuth(async (u) => {
       setUser(u);
-      if(u){
+      if (u) {
+        setSyncStatus("loading");
         try {
-          const data = await loadData(u.uid);
-          if(data){
-            setDone(data.done||{});
-            setTimes(data.times||{});
-            setOpenLv(data.openLv||{1:true});
-            if(data.isDarkMode !== undefined) setIsDarkMode(data.isDarkMode);
-            if(data.customLevels) setCustomLevels(data.customLevels);
-          } else {
-            // first login — mark level 0 done
-            const d={};
-            INITIAL_LEVELS[0].categories.forEach(c=>c.tasks.forEach(t=>{ d[t.id]=true; }));
-            setDone(d);
-          }
-        } catch(e){}
+          const d = await loadData(u.uid);
+          setData(d || DEFAULT_DATA);
+          setSyncStatus("idle");
+        } catch (e) {
+          setData(DEFAULT_DATA);
+          setSyncStatus("idle");
+        }
       }
     });
-    return unsub;
-  },[]);
+  }, []);
 
-  // live timer
-  useEffect(()=>{
-    if(activeTimer){
-      intervalRef.current = setInterval(()=> setElapsed(Math.floor((Date.now()-timerStart)/1000)), 500);
+  useEffect(() => {
+    if (activeTimer) {
+      intervalRef.current = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - timerRef.current.start) / 1000));
+      }, 500);
     } else {
       clearInterval(intervalRef.current);
       setElapsed(0);
     }
-    return ()=> clearInterval(intervalRef.current);
-  },[activeTimer, timerStart]);
+    return () => clearInterval(intervalRef.current);
+  }, [activeTimer]);
 
-  const persist = useCallback((d, t, ol, dm, cl)=>{
-    if(!user) return;
-    if(saveTimeout.current) clearTimeout(saveTimeout.current);
+  const persist = useCallback((d) => {
+    if (!user) return;
+    if (saveRef.current) clearTimeout(saveRef.current);
     setSyncStatus("saving");
-    saveTimeout.current = setTimeout(async()=>{
+    saveRef.current = setTimeout(async () => {
       try {
-        await saveData(user.uid, { done:d, times:t, openLv:ol, isDarkMode:dm, customLevels:cl });
+        await saveData(user.uid, d);
         setSyncStatus("saved");
-        setTimeout(()=> setSyncStatus("idle"), 2000);
-      } catch(e){ setSyncStatus("error"); }
-    }, 1000);
-  },[user]);
+        setTimeout(() => setSyncStatus("idle"), 2000);
+      } catch (e) {
+        setSyncStatus("error — check connection");
+        setTimeout(() => setSyncStatus("idle"), 3000);
+      }
+    }, 600);
+  }, [user]);
 
-  const getLive = (tid)=>{
-    const base = times[tid]||0;
-    if(activeTimer===tid) return base+elapsed;
-    return base;
-  };
+  const update = useCallback((fn) => {
+    setData(prev => {
+      const next = fn(JSON.parse(JSON.stringify(prev)));
+      persist(next);
+      return next;
+    });
+  }, [persist]);
 
-  const startTimer = (tid)=>{
-    if(activeTimer && activeTimer!==tid){
-      const secs = Math.floor((Date.now()-timerStart)/1000);
-      setTimes(prev=>{
-        const next={...prev,[activeTimer]:(prev[activeTimer]||0)+secs};
-        persist(done,next,openLv,isDarkMode,customLevels);
-        return next;
+  const stopActiveTimer = useCallback((targetId, currentData) => {
+    if (!timerRef.current.id) return currentData;
+    const secs = Math.floor((Date.now() - timerRef.current.start) / 1000);
+    const tid = timerRef.current.id;
+    timerRef.current = { id: null, start: null };
+    setActiveTimer(null);
+    const next = JSON.parse(JSON.stringify(currentData));
+    next.categories.forEach(c => c.levels.forEach(l => l.tasks.forEach(t => {
+      if (t.id === tid) t.time = (t.time || 0) + secs;
+    })));
+    return next;
+  }, []);
+
+  const startStop = useCallback((taskId) => {
+    if (timerRef.current.id === taskId) {
+      // stop
+      const secs = Math.floor((Date.now() - timerRef.current.start) / 1000);
+      timerRef.current = { id: null, start: null };
+      setActiveTimer(null);
+      update(d => {
+        d.categories.forEach(c => c.levels.forEach(l => l.tasks.forEach(t => {
+          if (t.id === taskId) t.time = (t.time || 0) + secs;
+        })));
+        return d;
+      });
+    } else {
+      // save previous if any
+      if (timerRef.current.id) {
+        const prevId = timerRef.current.id;
+        const secs = Math.floor((Date.now() - timerRef.current.start) / 1000);
+        update(d => {
+          d.categories.forEach(c => c.levels.forEach(l => l.tasks.forEach(t => {
+            if (t.id === prevId) t.time = (t.time || 0) + secs;
+          })));
+          return d;
+        });
+      }
+      timerRef.current = { id: taskId, start: Date.now() };
+      setActiveTimer(taskId);
+    }
+  }, [update]);
+
+  const toggleDone = useCallback((taskId) => {
+    if (timerRef.current.id === taskId) {
+      const secs = Math.floor((Date.now() - timerRef.current.start) / 1000);
+      timerRef.current = { id: null, start: null };
+      setActiveTimer(null);
+      update(d => {
+        d.categories.forEach(c => c.levels.forEach(l => l.tasks.forEach(t => {
+          if (t.id === taskId) { t.time = (t.time || 0) + secs; t.done = !t.done; }
+        })));
+        return d;
+      });
+    } else {
+      update(d => {
+        d.categories.forEach(c => c.levels.forEach(l => l.tasks.forEach(t => {
+          if (t.id === taskId) t.done = !t.done;
+        })));
+        return d;
       });
     }
-    setActiveTimer(tid);
-    setTimerStart(Date.now());
-  };
+  }, [update]);
 
-  const stopTimer = (tid)=>{
-    if(activeTimer!==tid) return;
-    const secs = Math.floor((Date.now()-timerStart)/1000);
-    setTimes(prev=>{
-      const next={...prev,[tid]:(prev[tid]||0)+secs};
-      persist(done,next,openLv,isDarkMode,customLevels);
-      return next;
-    });
-    setActiveTimer(null);
-    setTimerStart(null);
-  };
+  const getLive = useCallback((taskId) => {
+    const allTasks = data?.categories?.flatMap(c => c.levels.flatMap(l => l.tasks)) || [];
+    const task = allTasks.find(t => t.id === taskId);
+    const base = task?.time || 0;
+    if (timerRef.current.id === taskId) return base + elapsed;
+    return base;
+  }, [data, elapsed]);
 
-  const toggleDone = (tid)=>{
-    if(activeTimer===tid) stopTimer(tid);
-    setDone(prev=>{
-      const next={...prev,[tid]:!prev[tid]};
-      persist(next,times,openLv,isDarkMode,customLevels);
-      return next;
-    });
-  };
+  if (user === undefined) return <Splash text="loading..." />;
+  if (!user) return <LoginScreen onLogin={signIn} />;
+  if (!data) return <Splash text="loading your data..." />;
 
-  const toggleLv = (id)=>{
-    setOpenLv(prev=>{
-      const next={...prev,[id]:!prev[id]};
-      persist(done,times,next,isDarkMode,customLevels);
-      return next;
-    });
-  };
+  const activeCat = data.categories.find(c => c.id === data.activeCategory) || data.categories[0];
+  const syncColor = syncStatus === "saving" ? "#F59E0B" : syncStatus === "saved" ? "#22C55E" : syncStatus.startsWith("error") ? "#EF4444" : "#3A3A3A";
 
-  const toggleTheme = (darkOpt) => {
-    setIsDarkMode(darkOpt);
-    persist(done,times,openLv,darkOpt,customLevels);
-  };
-
-  // ─── EDIT & CUSTOM CATEGORY MANIPULATION FUNCTIONS ──────────────────
-  const handleCreateCategory = () => {
-    if(!newCatName.trim()) return;
-    const updated = customLevels.map(lvl => {
-      if(lvl.id === activeLevelEditId) {
-        return {
-          ...lvl,
-          categories: [...lvl.categories, { name: newCatName.trim(), tasks: [] }]
-        };
-      }
-      return lvl;
-    });
-    setCustomLevels(updated);
-    setNewCatName("");
-    persist(done,times,openLv,isDarkMode,updated);
-  };
-
-  const handleAddTask = (lvlId, catName) => {
-    const taskInputKey = `${lvlId}-${catName}`;
-    const taskText = newTaskNames[taskInputKey];
-    if(!taskText || !taskText.trim()) return;
-
-    const newTaskId = `custom-${Date.now()}`;
-    const updated = customLevels.map(lvl => {
-      if(lvl.id === lvlId) {
-        return {
-          ...lvl,
-          categories: lvl.categories.map(cat => {
-            if(cat.name === catName) {
-              return {
-                ...cat,
-                tasks: [...cat.tasks, { id: newTaskId, name: taskText.trim() }]
-              };
-            }
-            return cat;
-          })
-        };
-      }
-      return lvl;
-    });
-
-    setCustomLevels(updated);
-    setNewTaskNames(prev => ({ ...prev, [taskInputKey]: "" }));
-    persist(done,times,openLv,isDarkMode,updated);
-  };
-
-  const handleDeleteCategory = (lvlId, catName) => {
-    const updated = customLevels.map(lvl => {
-      if(lvl.id === lvlId) {
-        return {
-          ...lvl,
-          categories: lvl.categories.filter(cat => cat.name !== catName)
-        };
-      }
-      return lvl;
-    });
-    setCustomLevels(updated);
-    persist(done,times,openLv,isDarkMode,updated);
-  };
-
-  const totalDone = allTasksList.filter(t=>done[t.id]).length;
-  const totalTasks = allTasksList.length;
-  const pct = totalTasks ? Math.round((totalDone/totalTasks)*100) : 0;
-  const totalSecs = allTasksList.reduce((a,t)=>a+getLive(t.id),0);
-
-  // Theme Dynamic Style Configurations
-  const bgMain = isDarkMode ? "#0A0A0A" : "#FFFFFF";
-  const bgCard = isDarkMode ? "#18181B" : "#FAFAFA";
-  const bgSubCard = isDarkMode ? "#111113" : "#F4F4F5";
-  const borderCol = isDarkMode ? "#27272A" : "#E4E4E7";
-  const textPrimary = isDarkMode ? "#FAFAFA" : "#18181B";
-  const textSecondary = isDarkMode ? "#A1A1AA" : "#52525B";
-  const textMuted = isDarkMode ? "#52525B" : "#A1A1AA";
-
-  // ── LOADING ──
-  if(user===undefined){
-    return (
-      <div style={{background:"#0A0A0A",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
-        <div style={{color:"#52525B",fontFamily:"DM Mono, monospace",fontSize:13}}>loading...</div>
-      </div>
-    );
-  }
-
-  // ── LOGIN SCREEN ──
-  if(!user){
-    return (
-      <div style={{background:"#0A0A0A",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"DM Mono, monospace",padding:"2rem"}}>
-        <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
-        <div style={{maxWidth:340,width:"100%",textAlign:"center"}}>
-          <div style={{fontSize:11,color:"#52525B",letterSpacing:"0.1em",marginBottom:16}}>AUTOMATION → SOFTWARE DEVELOPER</div>
-          <div style={{fontSize:28,fontWeight:500,color:"#FAFAFA",marginBottom:8}}>career.track</div>
-          <div style={{fontSize:13,color:"#71717A",marginBottom:40,lineHeight:1.7}}>Your personal progress tracker.<br/>Sign in to access from any device.</div>
-          <button onClick={signInWithGoogle} style={{width:"100%",padding:"13px 20px",background:"#18181B",border:"1px solid #3F3F46",borderRadius:10,color:"#FAFAFA",fontSize:13,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:12,transition:"border-color .2s"}}>
-            <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
-            Continue with Google
-          </button>
-          <div style={{marginTop:20,fontSize:11,color:"#3F3F46"}}>Your data is private and tied to your Google account.</div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── MAIN APP LAYOUT ──
   return (
-    <div style={{fontFamily:"DM Mono, monospace",background:bgMain,minHeight:"100vh",color:textPrimary,transition:"background 0.2s, color 0.2s"}}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
+    <div style={{ fontFamily: "'Azeret Mono','Courier New',monospace", background: "#080808", minHeight: "100vh", color: "#E8E6E1" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@300;400;500;600&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0} input,button{font-family:inherit}
+        ::-webkit-scrollbar{width:3px} ::-webkit-scrollbar-track{background:#111} ::-webkit-scrollbar-thumb{background:#333}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.2}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+      `}</style>
 
-      {/* TOP NAVBAR (Includes track, edit, stats view toggles) */}
-      <div style={{position:"sticky",top:0,zIndex:50,background:bgMain,borderBottom:`1px solid ${borderCol}`,padding:"10px 16px",display:"flex",alignItems:"center",gap:10}}>
-        <div style={{flex:1}}>
-          <div style={{fontSize:13,fontWeight:500,color:textPrimary}}>track.it</div>
-          <div style={{fontSize:10,color:textSecondary}}>
-            {syncStatus==="saving" && "syncing..."}
-            {syncStatus==="saved" && "✓ synced"}
-            {syncStatus==="error" && "sync error"}
-            {syncStatus==="idle" && user.displayName}
+      {/* TOP BAR */}
+      <div style={{ position:"sticky", top:0, zIndex:100, background:"#080808ee", backdropFilter:"blur(12px)", borderBottom:"1px solid #1A1A1A", padding:"10px 16px", display:"flex", alignItems:"center", gap:10 }}>
+        <div style={{ flex:1 }}>
+          <div style={{ fontSize:14, fontWeight:600, color:"#E8E6E1", letterSpacing:"-0.02em" }}>
+            track<span style={{ color: activeCat?.color || "#3B82F6" }}>.</span>it
+          </div>
+          <div style={{ fontSize:9, color: syncColor, marginTop:1, letterSpacing:"0.06em", display:"flex", alignItems:"center", gap:4 }}>
+            {syncStatus === "saving" && <span style={{ display:"inline-block", animation:"spin .8s linear infinite" }}>⟳</span>}
+            {syncStatus === "saving" ? "saving..." : syncStatus === "saved" ? "✓ saved to cloud" : syncStatus.startsWith("error") ? syncStatus : user.displayName}
           </div>
         </div>
-        <div style={{display:"flex",background:bgCard,borderRadius:8,border:`1px solid ${borderCol}`,overflow:"hidden"}}>
-          {["track","edit","stats"].map(p=>(
-            <button key={p} onClick={()=>setPage(p)} style={{fontSize:11,padding:"5px 14px",background:page===p?borderCol:"transparent",color:page===p?textPrimary:textSecondary,border:"none",cursor:"pointer",fontFamily:"inherit",letterSpacing:"0.04em",textTransform:"lowercase"}}>{p}</button>
+        <nav style={{ display:"flex", gap:2, background:"#111", borderRadius:8, padding:2, border:"1px solid #1E1E1E" }}>
+          {[["tracker","track"],["manage","edit"],["stats","stats"]].map(([p, label]) => (
+            <button key={p} onClick={() => setPage(p)} style={{ fontSize:10, padding:"4px 10px", borderRadius:6, background:page===p?"#1E1E1E":"transparent", color:page===p?"#E8E6E1":"#555", border:"none", cursor:"pointer", letterSpacing:"0.04em" }}>{label}</button>
           ))}
-        </div>
-        <button onClick={logOut} style={{fontSize:11,padding:"5px 10px",background:"transparent",border:`1px solid ${borderCol}`,borderRadius:7,color:textSecondary,cursor:"pointer",fontFamily:"inherit"}}>sign out</button>
+        </nav>
+        <button onClick={logOut} style={{ fontSize:10, padding:"4px 8px", background:"transparent", border:"1px solid #222", borderRadius:6, color:"#444", cursor:"pointer" }}>out</button>
       </div>
 
-      {/* GLOBAL STATS STRIP */}
-      <div style={{padding:"14px 16px 0"}}>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
-          {[["done",`${totalDone}/${totalTasks}`],["progress",`${pct}%`],["time",fmtHuman(totalSecs)],["xp",`${totalDone*100}`]].map(([label,val])=>(
-            <div key={label} style={{background:bgCard,border:`1px solid ${borderCol}`,borderRadius:8,padding:"8px 10px"}}>
-              <div style={{fontSize:9,color:textMuted,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:3}}>{label}</div>
-              <div style={{fontSize:14,fontWeight:500,color:textPrimary}}>{val}</div>
-            </div>
-          ))}
-        </div>
-        <div style={{height:3,background:borderCol,borderRadius:2,marginBottom:14}}>
-          <div style={{height:"100%",width:`${pct}%`,background:"linear-gradient(90deg,#1D4ED8,#6D28D9)",borderRadius:2,transition:"width .5s"}}/>
-        </div>
+      {/* CATEGORY TABS */}
+      <div style={{ display:"flex", gap:6, padding:"10px 16px 0", overflowX:"auto" }}>
+        {data.categories.map(cat => (
+          <button key={cat.id} onClick={() => update(d => { d.activeCategory = cat.id; return d; })}
+            style={{ fontSize:11, padding:"5px 12px", borderRadius:20, border:`1px solid ${cat.id===data.activeCategory?cat.color:"#1E1E1E"}`, background:cat.id===data.activeCategory?cat.color+"22":"transparent", color:cat.id===data.activeCategory?cat.color:"#555", cursor:"pointer", whiteSpace:"nowrap" }}>
+            {cat.name}
+          </button>
+        ))}
+        <button onClick={() => setPage("manage")} style={{ fontSize:11, padding:"5px 10px", borderRadius:20, border:"1px dashed #222", background:"transparent", color:"#333", cursor:"pointer" }}>+ add</button>
       </div>
 
-      {/* ACTIVE RUNNING TIMER */}
-      {activeTimer&&(()=> {
-        const t=allTasksList.find(t=>t.id===activeTimer);
-        return(
-          <div style={{margin:"0 16px 12px",background:isDarkMode?"#052e16":"#DCFCE7",border:"1px solid #22C55E",borderRadius:8,padding:"8px 12px",display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:8,height:8,borderRadius:"50%",background:"#22C55E",animation:"pulse 1s infinite"}}/>
-            <div style={{flex:1,fontSize:11,color:isDarkMode?"#86EFAC":"#15803D",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t?.name}</div>
-            <div style={{fontSize:16,fontWeight:500,color:"#22C55E",fontVariantNumeric:"tabular-nums"}}>{fmtTimer(getLive(activeTimer))}</div>
-            <button onClick={()=>stopTimer(activeTimer)} style={{fontSize:11,padding:"3px 10px",background:isDarkMode?"#166534":"#BBF7D0",border:"1px solid #22C55E",borderRadius:6,color:isDarkMode?"#22C55E":"#166534",cursor:"pointer",fontFamily:"inherit"}}>■ stop</button>
+      {/* ACTIVE TIMER BANNER */}
+      {activeTimer && (() => {
+        const task = data.categories.flatMap(c => c.levels.flatMap(l => l.tasks)).find(t => t.id === activeTimer);
+        return (
+          <div style={{ margin:"10px 16px 0", background:"#0A1F0F", border:"1px solid #1A3A20", borderRadius:8, padding:"8px 12px", display:"flex", alignItems:"center", gap:8 }}>
+            <div style={{ width:7, height:7, borderRadius:"50%", background:"#22C55E", animation:"pulse 1.2s infinite" }} />
+            <span style={{ flex:1, fontSize:11, color:"#4ADE80", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{task?.name}</span>
+            <span style={{ fontSize:15, fontWeight:600, color:"#22C55E", fontVariantNumeric:"tabular-nums" }}>{fmtTimer(getLive(activeTimer))}</span>
+            <button onClick={() => startStop(activeTimer)} style={{ fontSize:10, padding:"3px 9px", background:"#1A3A20", border:"1px solid #22C55E44", borderRadius:5, color:"#22C55E", cursor:"pointer" }}>■ stop</button>
           </div>
         );
       })()}
 
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}`}</style>
+      <div style={{ padding:"12px 16px 80px" }}>
+        {page==="tracker" && activeCat && <TrackerPage cat={activeCat} activeTimer={activeTimer} getLive={getLive} toggleDone={toggleDone} startStop={startStop} update={update} />}
+        {page==="manage" && <ManagePage data={data} update={update} setPage={setPage} />}
+        {page==="stats" && <StatsPage data={data} activeTimer={activeTimer} getLive={getLive} />}
+      </div>
+    </div>
+  );
+}
 
-      {/* RENDER PAGES BASED ON NAVIGATION */}
-      {page === "track" && (
-        <TasksPage customLevels={customLevels} done={done} getLive={getLive} activeTimer={activeTimer} toggleDone={toggleDone} startTimer={startTimer} stopTimer={stopTimer} openLv={openLv} toggleLv={toggleLv} isDarkMode={isDarkMode} bgCard={bgCard} bgSubCard={bgSubCard} borderCol={borderCol} textPrimary={textPrimary} textSecondary={textSecondary} textMuted={textMuted} newTaskNames={newTaskNames} setNewTaskNames={setNewTaskNames} handleAddTask={handleAddTask}/>
-      )}
+function TrackerPage({ cat, activeTimer, getLive, toggleDone, startStop, update }) {
+  const [openLv, setOpenLv] = useState(() => ({ [cat.levels[0]?.id]: true }));
+  const allTasks = cat.levels.flatMap(l => l.tasks);
+  const done = allTasks.filter(t => t.done).length;
+  const pct = allTasks.length ? Math.round(done / allTasks.length * 100) : 0;
 
-      {page === "edit" && (
-        <div style={{padding:"0 16px 20px"}}>
-          {/* MANAGE / CREATE CATEGORY PANEL */}
-          <div style={{border:`1px solid ${borderCol}`, borderRadius:10, background:bgSubCard, padding:"16px", marginBottom:20}}>
-            <div style={{fontSize:10, color:textMuted, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:12}}>Manage Categories</div>
-            
-            <div style={{display:"flex", flexDirection:"column", gap:10, marginBottom:16}}>
-              <input type="text" placeholder="e.g. Fitness, Arabic, Side project..." value={newCatName} onChange={(e)=>setNewCatName(e.target.value)} style={{background:bgCard, border:`1px solid ${borderCol}`, borderRadius:6, padding:"10px", fontSize:12, color:textPrimary, fontFamily:"inherit", outline:"none", width:"100%"}} />
-              
-              <div style={{display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
-                <span style={{fontSize:11, color:textSecondary, marginRight:4}}>Target Level:</span>
-                {[0, 1, 2, 3, 4].map(lNum => (
-                  <button key={lNum} onClick={() => setActiveLevelEditId(lNum)} style={{fontFamily:"inherit", fontSize:11, padding:"3px 8px", borderRadius:4, border:`1px solid ${activeLevelEditId===lNum ? "#1D4ED8":borderCol}`, background: activeLevelEditId===lNum ? "#1D4ED8":"transparent", color: activeLevelEditId===lNum ? "#FFF":textSecondary, cursor:"pointer"}}>LVL {lNum}</button>
-                ))}
+  return (
+    <div>
+      <div style={{ marginBottom:12 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+          <div>
+            <div style={{ fontSize:16, fontWeight:600, color:cat.color }}>{cat.name}</div>
+            <div style={{ fontSize:10, color:"#444", marginTop:1 }}>{done}/{allTasks.length} tasks · {pct}% complete</div>
+          </div>
+          <div style={{ fontSize:24, fontWeight:600, color:"#1E1E1E" }}>{pct}%</div>
+        </div>
+        <div style={{ height:2, background:"#111", borderRadius:1 }}>
+          <div style={{ height:"100%", width:`${pct}%`, background:cat.color, borderRadius:1, transition:"width .5s" }} />
+        </div>
+      </div>
+
+      {cat.levels.map(lv => {
+        const lvDone = lv.tasks.filter(t => t.done).length;
+        const lvPct = lv.tasks.length ? Math.round(lvDone / lv.tasks.length * 100) : 0;
+        const lvSecs = lv.tasks.reduce((a, t) => a + getLive(t.id), 0);
+        const isOpen = !!openLv[lv.id];
+
+        return (
+          <div key={lv.id} style={{ marginBottom:8, border:`1px solid ${isOpen?cat.color+"33":"#141414"}`, borderRadius:10, overflow:"hidden", background:"#0D0D0D" }}>
+            <div onClick={() => setOpenLv(p => ({ ...p, [lv.id]: !p[lv.id] }))}
+              style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 12px", cursor:"pointer", background:isOpen?cat.color+"0A":"transparent" }}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:12, fontWeight:500, color:"#D4D0C8" }}>{lv.name}</div>
+                {lv.subtitle && <div style={{ fontSize:10, color:"#3A3A3A", marginTop:1 }}>{lv.subtitle}</div>}
               </div>
-
-              {/* Mockup Dot Color selector presets */}
-              <div style={{display:"flex", gap:8, alignItems:"center", marginTop:6, flexWrap:"wrap"}}>
-                <span style={{fontSize:11, color:textSecondary}}>Color:</span>
-                {PRESET_COLORS.map(c => (
-                  <div key={c} onClick={() => setSelectedCatColor(c)} style={{width:18, height:18, borderRadius:"50%", background:c, cursor:"pointer", border:selectedCatColor===c ? `2px solid ${textPrimary}` : `1px solid transparent`, transform: selectedCatColor===c ? "scale(1.15)":"scale(1)", transition:"all 0.1s"}} />
-                ))}
-              </div>
+              {lvSecs>0 && <span style={{ fontSize:10, color:"#22C55E", background:"#0A1F0F", padding:"1px 7px", borderRadius:20 }}>{fmtHuman(lvSecs)}</span>}
+              <span style={{ fontSize:11, color:cat.color, fontWeight:500 }}>{lvPct}%</span>
+              <span style={{ fontSize:10, color:"#333" }}>{isOpen?"▴":"▾"}</span>
+            </div>
+            <div style={{ height:1, background:"#111" }}>
+              <div style={{ height:"100%", width:`${lvPct}%`, background:cat.color+"66", transition:"width .4s" }} />
             </div>
 
-            <button onClick={handleCreateCategory} style={{width:"100%", background:"#10B981", border:"none", borderRadius:6, padding:"10px", color:"#FFF", fontSize:12, fontWeight:500, cursor:"pointer", fontFamily:"inherit"}}>Create Category</button>
-          </div>
-
-          {/* ACTIVE CATEGORIES LIST TO REMOVE/EDIT */}
-          <div style={{display:"flex", flexDirection:"column", gap:10}}>
-            {customLevels.map(lvl => (
-              <div key={lvl.id}>
-                {lvl.categories.length > 0 && (
-                  <div style={{fontSize:11, fontWeight:500, color: lvl.color, marginBottom:6, textTransform:"uppercase"}}>{lvl.tag} — {lvl.title}</div>
-                )}
-                <div style={{display:"flex", flexDirection:"column", gap:6, marginBottom:12}}>
-                  {lvl.categories.map(cat => (
-                    <div key={cat.name} style={{display:"flex", alignItems:"center", justifyContent:"space-between", background:bgCard, border:`1px solid ${borderCol}`, borderRadius:8, padding:"10px 14px"}}>
-                      <div style={{display:"flex", alignItems:"center", gap:10}}>
-                        <div style={{width:10, height:10, borderRadius:"50%", background: lvl.color}} />
-                        <span style={{fontSize:13, color:textPrimary}}>{cat.name}</span>
-                        <span style={{fontSize:10, color:textMuted}}>({cat.tasks.length} tasks)</span>
+            {isOpen && (
+              <div style={{ padding:"8px 12px 12px", display:"flex", flexDirection:"column", gap:4 }}>
+                {lv.tasks.map(t => {
+                  const liveTime = getLive(t.id);
+                  const running = activeTimer === t.id;
+                  return (
+                    <div key={t.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"7px 10px", borderRadius:7, background:running?"#0A1F0F":"#111", border:`1px solid ${running?"#1A3A20":"#1A1A1A"}`, transition:"all .2s" }}>
+                      <div onClick={() => toggleDone(t.id)}
+                        style={{ width:17, height:17, borderRadius:4, border:`1.5px solid ${t.done?cat.color:"#2A2A2A"}`, background:t.done?cat.color:"transparent", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", flexShrink:0, transition:"all .15s" }}>
+                        {t.done && <span style={{ fontSize:10, color:"#000", lineHeight:1, fontWeight:700 }}>✓</span>}
                       </div>
-                      <button onClick={() => handleDeleteCategory(lvl.id, cat.name)} style={{background:"transparent", border:`1px solid #EF4444`, color:"#EF4444", fontSize:11, padding:"2px 8px", borderRadius:4, cursor:"pointer", fontFamily:"inherit"}}>edit / delete</button>
+                      <span style={{ flex:1, fontSize:11, color:t.done?"#333":"#C8C4BC", textDecoration:t.done?"line-through":"none" }}>{t.name}</span>
+                      <span style={{ fontSize:10, color:running?"#22C55E":liveTime>0?"#555":"#222", fontVariantNumeric:"tabular-nums", minWidth:42, textAlign:"right" }}>
+                        {running ? fmtTimer(liveTime) : liveTime>0 ? fmtHuman(liveTime) : "—"}
+                      </span>
+                      <button onClick={() => startStop(t.id)}
+                        style={{ fontSize:11, width:28, height:28, borderRadius:5, border:`1px solid ${running?"#22C55E44":"#222"}`, background:running?"#0A2F14":"transparent", color:running?"#22C55E":"#333", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                        {running ? "■" : "▶"}
+                      </button>
                     </div>
-                  ))}
+                  );
+                })}
+                <AddInline placeholder="+ add task" color={cat.color} onAdd={(name) => update(d => {
+                  const l = d.categories.find(c => c.id === cat.id)?.levels.find(l => l.id === lv.id);
+                  if (l) l.tasks.push({ id: uid(), name, done: false, time: 0 });
+                  return d;
+                })} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <AddInline placeholder="+ add level" color={cat.color} big onAdd={(name) => update(d => {
+        const c = d.categories.find(c => c.id === cat.id);
+        if (c) c.levels.push({ id: uid(), name, subtitle: "", tasks: [] });
+        return d;
+      })} />
+    </div>
+  );
+}
+
+function ManagePage({ data, update, setPage }) {
+  const [newName, setNewName] = useState("");
+  const [newColor, setNewColor] = useState(COLORS[1]);
+  const [editId, setEditId] = useState(null);
+
+  return (
+    <div>
+      <div style={{ fontSize:11, color:"#444", letterSpacing:"0.08em", marginBottom:14 }}>MANAGE CATEGORIES</div>
+
+      {data.categories.map(cat => (
+        <div key={cat.id} style={{ marginBottom:8, border:"1px solid #1A1A1A", borderRadius:10, overflow:"hidden", background:"#0D0D0D" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 12px" }}>
+            <div style={{ width:10, height:10, borderRadius:"50%", background:cat.color, flexShrink:0 }} />
+            {editId===cat.id
+              ? <input value={cat.name} onChange={e => update(d => { const c=d.categories.find(c=>c.id===cat.id); if(c) c.name=e.target.value; return d; })}
+                  style={{ flex:1, fontSize:12, background:"#111", border:"1px solid #2A2A2A", borderRadius:5, color:"#E8E6E1", padding:"3px 8px" }} />
+              : <span style={{ flex:1, fontSize:12, color:"#D4D0C8", fontWeight:500 }}>{cat.name}</span>
+            }
+            <span style={{ fontSize:10, color:"#2A2A2A" }}>{cat.levels.flatMap(l=>l.tasks).length} tasks</span>
+            <button onClick={() => setEditId(editId===cat.id?null:cat.id)}
+              style={{ fontSize:10, padding:"3px 8px", background:"transparent", border:"1px solid #222", borderRadius:5, color:"#555", cursor:"pointer" }}>
+              {editId===cat.id?"done":"edit"}
+            </button>
+            {data.categories.length > 1 &&
+              <button onClick={() => update(d => { d.categories=d.categories.filter(c=>c.id!==cat.id); if(d.activeCategory===cat.id) d.activeCategory=d.categories[0]?.id; return d; })}
+                style={{ fontSize:10, padding:"3px 8px", background:"transparent", border:"1px solid #2A1A1A", borderRadius:5, color:"#5A2A2A", cursor:"pointer" }}>del</button>
+            }
+          </div>
+          {editId===cat.id && (
+            <div style={{ padding:"0 12px 12px", borderTop:"1px solid #141414" }}>
+              <div style={{ fontSize:9, color:"#333", letterSpacing:"0.08em", margin:"10px 0 6px" }}>COLOR</div>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:12 }}>
+                {COLORS.map(c => (
+                  <div key={c} onClick={() => update(d => { const cat2=d.categories.find(x=>x.id===cat.id); if(cat2) cat2.color=c; return d; })}
+                    style={{ width:22, height:22, borderRadius:"50%", background:c, cursor:"pointer", border:`2.5px solid ${cat.color===c?"#fff":"transparent"}` }} />
+                ))}
+              </div>
+              <div style={{ fontSize:9, color:"#333", letterSpacing:"0.08em", marginBottom:6 }}>LEVELS</div>
+              {cat.levels.map(lv => (
+                <div key={lv.id} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                  <span style={{ flex:1, fontSize:11, color:"#444" }}>{lv.name} ({lv.tasks.length} tasks)</span>
+                  <button onClick={() => update(d => { const c=d.categories.find(c=>c.id===cat.id); if(c) c.levels=c.levels.filter(l=>l.id!==lv.id); return d; })}
+                    style={{ fontSize:10, padding:"2px 7px", background:"transparent", border:"1px solid #2A1A1A", borderRadius:4, color:"#5A2A2A", cursor:"pointer" }}>del</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+
+      <div style={{ marginTop:16, border:"1px dashed #1E1E1E", borderRadius:10, padding:"14px 12px", background:"#0A0A0A" }}>
+        <div style={{ fontSize:10, color:"#444", letterSpacing:"0.08em", marginBottom:10 }}>NEW CATEGORY</div>
+        <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key==="Enter" && newName.trim() && (() => { update(d => { const id=uid(); d.categories.push({id,name:newName.trim(),color:newColor,levels:[]}); d.activeCategory=id; return d; }); setNewName(""); setPage("tracker"); })()}
+          placeholder="e.g. Fitness, Arabic, Side project..."
+          style={{ width:"100%", fontSize:12, background:"#111", border:"1px solid #1E1E1E", borderRadius:7, color:"#E8E6E1", padding:"8px 10px", marginBottom:10 }} />
+        <div style={{ fontSize:9, color:"#333", letterSpacing:"0.08em", marginBottom:6 }}>COLOR</div>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:12 }}>
+          {COLORS.map(c => (
+            <div key={c} onClick={() => setNewColor(c)}
+              style={{ width:22, height:22, borderRadius:"50%", background:c, cursor:"pointer", border:`2.5px solid ${newColor===c?"#fff":"transparent"}` }} />
+          ))}
+        </div>
+        <button onClick={() => { if(!newName.trim()) return; update(d => { const id=uid(); d.categories.push({id,name:newName.trim(),color:newColor,levels:[]}); d.activeCategory=id; return d; }); setNewName(""); setPage("tracker"); }}
+          style={{ width:"100%", padding:"9px", background:newColor, border:"none", borderRadius:7, color:"#000", fontSize:12, fontWeight:600, cursor:"pointer", letterSpacing:"0.02em" }}>
+          Create Category
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function StatsPage({ data, activeTimer, getLive }) {
+  const allTasks = data.categories.flatMap(c => c.levels.flatMap(l => l.tasks.map(t => ({ ...t, catName:c.name, catColor:c.color, liveTime:getLive(t.id) }))));
+  const totalDone = allTasks.filter(t => t.done).length;
+  const totalSecs = allTasks.reduce((a, t) => a + t.liveTime, 0);
+  const topTasks = [...allTasks].filter(t => t.liveTime>0).sort((a,b) => b.liveTime-a.liveTime).slice(0,8);
+  const maxSecs = topTasks[0]?.liveTime || 1;
+
+  return (
+    <div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:16 }}>
+        {[["done",totalDone],["total",allTasks.length],["time",fmtHuman(totalSecs)]].map(([k,v]) => (
+          <div key={k} style={{ background:"#0D0D0D", border:"1px solid #141414", borderRadius:8, padding:"10px" }}>
+            <div style={{ fontSize:9, color:"#333", letterSpacing:"0.08em", marginBottom:4 }}>{k.toUpperCase()}</div>
+            <div style={{ fontSize:16, fontWeight:600, color:"#D4D0C8" }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ fontSize:10, color:"#333", letterSpacing:"0.08em", marginBottom:10 }}>BY CATEGORY</div>
+      {data.categories.map(cat => {
+        const tasks = cat.levels.flatMap(l => l.tasks.map(t => ({ ...t, liveTime:getLive(t.id) })));
+        const done = tasks.filter(t => t.done).length;
+        const secs = tasks.reduce((a,t) => a+t.liveTime, 0);
+        const pct = tasks.length ? Math.round(done/tasks.length*100) : 0;
+        return (
+          <div key={cat.id} style={{ marginBottom:8, background:"#0D0D0D", border:"1px solid #141414", borderRadius:8, padding:"10px 12px" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:7 }}>
+                <div style={{ width:8, height:8, borderRadius:"50%", background:cat.color }} />
+                <span style={{ fontSize:12, color:"#C8C4BC" }}>{cat.name}</span>
+              </div>
+              <span style={{ fontSize:11, color:"#444" }}>{pct}% · {fmtHuman(secs)}</span>
+            </div>
+            <div style={{ height:3, background:"#111", borderRadius:2 }}>
+              <div style={{ height:"100%", width:`${pct}%`, background:cat.color, borderRadius:2, transition:"width .4s" }} />
+            </div>
+            <div style={{ fontSize:10, color:"#2A2A2A", marginTop:4 }}>{done} of {tasks.length} tasks · {cat.levels.length} levels</div>
+          </div>
+        );
+      })}
+
+      {topTasks.length>0 && (
+        <div style={{ marginTop:16 }}>
+          <div style={{ fontSize:10, color:"#333", letterSpacing:"0.08em", marginBottom:10 }}>MOST TIME SPENT</div>
+          <div style={{ background:"#0D0D0D", border:"1px solid #141414", borderRadius:8, padding:"10px 12px", display:"flex", flexDirection:"column", gap:8 }}>
+            {topTasks.map(t => (
+              <div key={t.id}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3 }}>
+                  <span style={{ fontSize:11, color:"#555", maxWidth:"75%", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", textDecoration:t.done?"line-through":"none" }}>{t.name}</span>
+                  <span style={{ fontSize:10, color:"#444" }}>{fmtHuman(t.liveTime)}</span>
+                </div>
+                <div style={{ height:2, background:"#111", borderRadius:1 }}>
+                  <div style={{ height:"100%", width:`${Math.round(t.liveTime/maxSecs*100)}%`, background:t.catColor+"88", borderRadius:1 }} />
                 </div>
               </div>
             ))}
           </div>
         </div>
       )}
-
-      {page === "stats" && (
-        <StatsPage allTasksList={allTasksList} done={done} getLive={getLive} totalSecs={totalSecs} isDarkMode={isDarkMode} bgCard={bgCard} bgSubCard={bgSubCard} borderCol={borderCol} textPrimary={textPrimary} textSecondary={textSecondary} textMuted={textMuted} customLevels={customLevels}/>
-      )}
-
-      {/* SYSTEM CONFIGURATION BLOCK */}
-      <div style={{padding:"0 16px 40px", marginTop: "20px"}}>
-        <div style={{border:`1px solid ${borderCol}`, borderRadius:10, background:bgSubCard, overflow:"hidden", padding:"16px"}}>
-          <h3 style={{fontSize:14, fontWeight:500, color:textPrimary, marginBottom:12}}>Settings</h3>
-          
-          <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14}}>
-            <span style={{fontSize:12, color:textSecondary}}>Color Theme</span>
-            <div style={{display:"flex", background:bgCard, border:`1px solid ${borderCol}`, borderRadius:6, overflow:"hidden"}}>
-              <button onClick={() => toggleTheme(false)} style={{fontFamily:"inherit", fontSize:11, padding:"6px 14px", border:"none", cursor:"pointer", background: !isDarkMode ? "#1D4ED8" : "transparent", color: !isDarkMode ? "#FFFFFF" : textSecondary, fontWeight: !isDarkMode ? 500 : 400}}>Light</button>
-              <button onClick={() => toggleTheme(true)} style={{fontFamily:"inherit", fontSize:11, padding:"6px 14px", border:"none", cursor:"pointer", background: isDarkMode ? "#1D4ED8" : "transparent", color: isDarkMode ? "#FFFFFF" : textSecondary, fontWeight: isDarkMode ? 500 : 400}}>Dark</button>
-            </div>
-          </div>
-          
-          <div style={{fontSize:11, color:textMuted, lineHeight: 1.5}}>
-            <div style={{marginBottom:4}}>Account: connected</div>
-            <div>Integrations: Cloud Sync Storage</div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
 
-// ─── TRACK/TASKS SUB-PAGE ENGINE ───────────────────────────────────────────────
-function TasksPage({customLevels,done,getLive,activeTimer,toggleDone,startTimer,stopTimer,openLv,toggleLv,isDarkMode,bgCard,bgSubCard,borderCol,textPrimary,textSecondary,textMuted,newTaskNames,setNewTaskNames,handleAddTask}){
-  return(
-    <div style={{padding:"0 16px 10px"}}>
-      {customLevels.map(lv=>{
-        const allT=lv.categories.flatMap(c=>c.tasks);
-        const lvDone=allT.filter(t=>done[t.id]).length;
-        const lvPct=allT.length?Math.round(lvDone/allT.length*100):0;
-        const lvSecs=allT.reduce((a,t)=>a+getLive(t.id),0);
-        const isOpen=!!openLv[lv.id];
-        const currentLvColor = isDarkMode ? lv.color : (lv.id === 0 ? "#71717A" : lv.color);
-        
-        return(
-          <div key={lv.id} style={{marginBottom:10,border:`1px solid ${isOpen?currentLvColor+"55":borderCol}`,borderRadius:10,overflow:"hidden",background:bgSubCard}}>
-            <div onClick={()=>toggleLv(lv.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",cursor:"pointer",background:isOpen?currentLvColor+"11":"transparent"}}>
-              <span style={{fontSize:10,fontWeight:500,color:currentLvColor,background:currentLvColor+"22",padding:"2px 8px",borderRadius:20,border:`1px solid ${currentLvColor}44`,letterSpacing:"0.06em"}}>{lv.tag}</span>
-              <div style={{flex:1}}>
-                <div style={{fontSize:13,fontWeight:500,color:textPrimary}}>{lv.title}</div>
-                <div style={{fontSize:10,color:textSecondary,marginTop:1}}>{lv.subtitle}</div>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:12,color:currentLvColor,fontWeight:500}}>{lvPct}%</div>
-                {lvSecs>0&&<div style={{fontSize:10,color:textMuted}}>{fmtHuman(lvSecs)}</div>}
-              </div>
-              <span style={{fontSize:12,color:textMuted}}>{isOpen?"▴":"▾"}</span>
-            </div>
-            <div style={{height:2,background:borderCol}}>
-              <div style={{height:"100%",width:`${lvPct}%`,background:currentLvColor,transition:"width .4s"}}/>
-            </div>
-            {isOpen&&(
-              <div style={{padding:"10px 14px 14px"}}>
-                {lv.categories.map(cat=>{
-                  const catDone=cat.tasks.filter(t=>done[t.id]).length;
-                  const inputKey = `${lv.id}-${cat.name}`;
-                  return(
-                    <div key={cat.name} style={{marginBottom:16}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                        <span style={{fontSize:10,color:textMuted,letterSpacing:"0.08em",textTransform:"uppercase",whiteSpace:"nowrap"}}>{cat.name}</span>
-                        <span style={{fontSize:10,color:textSecondary}}>{catDone}/{cat.tasks.length}</span>
-                        <div style={{flex:1,height:1,background:borderCol}}/>
-                      </div>
-
-                      {/* Inline Task Adder Box */}
-                      <div style={{display:"flex", gap:6, marginBottom:8}}>
-                        <input type="text" placeholder="+ add task" value={newTaskNames[inputKey] || ""} onChange={(e) => setNewTaskNames({...newTaskNames, [inputKey]: e.target.value})} onKeyDown={(e) => e.key === 'Enter' && handleAddTask(lv.id, cat.name)} style={{flex:1, background:bgCard, border:`1px solid ${borderCol}`, borderRadius:6, padding:"5px 10px", fontSize:11, color:textPrimary, fontFamily:"inherit", outline:"none"}} />
-                        <button onClick={() => handleAddTask(lv.id, cat.name)} style={{background:currentLvColor, border:"none", borderRadius:6, padding:"0 12px", color:"#FFF", fontSize:11, cursor:"pointer", fontFamily:"inherit"}}>+</button>
-                      </div>
-
-                      <div style={{display:"flex", flexDirection:"column", gap:4}}>
-                        {cat.tasks.map(t=>{
-                          const isDone=!!done[t.id];
-                          const isActive=activeTimer===t.id;
-                          const liveTime=getLive(t.id);
-                          return(
-                            <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",borderRadius:7,background:bgCard,border:`1px solid ${isActive?"#166534":borderCol}`,transition:"border-color .2s"}}>
-                              <div onClick={()=>toggleDone(t.id)} style={{width:17,height:17,borderRadius:4,border:`1.5px solid ${isDone?currentLvColor:(isDarkMode?"#3F3F46":"#B4B4B8")}`,background:isDone?currentLvColor:"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,transition:"all .2s"}}>
-                                {isDone&&<span style={{fontSize:10,color:"#fff",lineHeight:1}}>✓</span>}
-                              </div>
-                              <span style={{flex:1,fontSize:12,color:isDone?textMuted:textPrimary,textDecoration:isDone?"line-through":"none"}}>{t.name}</span>
-                              <span style={{fontSize:11,color:isActive?"#22C55E":liveTime>0?textSecondary:textMuted,fontVariantNumeric:"tabular-nums",minWidth:44,textAlign:"right"}}>
-                                {isActive?fmtTimer(liveTime):liveTime>0?fmtHuman(liveTime):"—"}
-                              </span>
-                              <button onClick={()=>isActive?stopTimer(t.id):startTimer(t.id)} style={{fontSize:11,padding:"3px 9px",borderRadius:5,border:`1px solid ${isActive?"#166534":(isDarkMode?"#3F3F46":"#B4B4B8")}`,background:isActive?(isDarkMode?"#052e16":"#DCFCE7"):"transparent",color:isActive?"#22C55E":textSecondary,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
-                                {isActive?"■":"▶"}
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })}
+function AddInline({ placeholder, onAdd, color, big }) {
+  const [val, setVal] = useState("");
+  const [active, setActive] = useState(false);
+  if (!active) return (
+    <button onClick={() => setActive(true)}
+      style={{ fontSize:10, padding:big?"8px 10px":"5px 10px", background:"transparent", border:`1px dashed ${color}33`, borderRadius:6, color:color+"66", cursor:"pointer", width:"100%", textAlign:"left", marginTop:big?8:0 }}>
+      {placeholder}
+    </button>
+  );
+  return (
+    <div style={{ display:"flex", gap:5, marginTop:big?8:0 }}>
+      <input autoFocus value={val} onChange={e => setVal(e.target.value)}
+        onKeyDown={e => { if(e.key==="Enter"&&val.trim()){onAdd(val.trim());setVal("");setActive(false);} if(e.key==="Escape") setActive(false); }}
+        placeholder="Type name and press Enter..."
+        style={{ flex:1, fontSize:11, background:"#111", border:`1px solid ${color}55`, borderRadius:6, color:"#E8E6E1", padding:"6px 9px" }} />
+      <button onClick={() => { if(val.trim()){onAdd(val.trim());setVal("");} setActive(false); }}
+        style={{ fontSize:10, padding:"6px 10px", background:color+"22", border:`1px solid ${color}44`, borderRadius:6, color:color, cursor:"pointer" }}>add</button>
+      <button onClick={() => setActive(false)}
+        style={{ fontSize:10, padding:"6px 8px", background:"transparent", border:"1px solid #222", borderRadius:6, color:"#333", cursor:"pointer" }}>✕</button>
     </div>
   );
 }
 
-// ─── STATS SUB-PAGE ENGINE ───────────────────────────────────────────────────────────────
-function StatsPage({allTasksList,done,getLive,totalSecs,isDarkMode,bgCard,bgSubCard,borderCol,textPrimary,textSecondary,textMuted,customLevels}){
-  const topTasks=[...allTasksList].map(t=>({...t,secs:getLive(t.id)})).filter(t=>t.secs>0).sort((a,b)=>b.secs-a.secs).slice(0,8);
-  const maxSecs=topTasks[0]?.secs||1;
+function Splash({ text }) {
+  return (
+    <div style={{ background:"#080808", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Azeret Mono,monospace", color:"#333", fontSize:12 }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400&display=swap');`}</style>
+      {text}
+    </div>
+  );
+}
 
-  return(
-    <div style={{padding:"0 16px 10px"}}>
-      <div style={{marginBottom:16}}>
-        <div style={{fontSize:10,color:textMuted,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>Level breakdown</div>
-        {customLevels.map(lv=>{
-          const allT=lv.categories.flatMap(c=>c.tasks);
-          const lvDone=allT.filter(t=>done[t.id]).length;
-          const lvSecs=allT.reduce((a,t)=>a+getLive(t.id),0);
-          const lvPct=allT.length?Math.round(lvDone/allT.length*100):0;
-          const currentLvColor = isDarkMode ? lv.color : (lv.id === 0 ? "#71717A" : lv.color);
-          
-          return(
-            <div key={lv.id} style={{marginBottom:8,background:bgCard,border:`1px solid ${borderCol}`,borderRadius:8,padding:"10px 12px"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontSize:10,color:currentLvColor,background:currentLvColor+"22",padding:"1px 7px",borderRadius:20,border:`1px solid ${currentLvColor}33`}}>{lv.tag}</span>
-                  <span style={{fontSize:12,color:textPrimary}}>{lv.title}</span>
-                </div>
-                <div>
-                  <span style={{fontSize:12,color:currentLvColor,fontWeight:500}}>{lvPct}%</span>
-                  <span style={{fontSize:11,color:textMuted,marginLeft:8}}>{fmtHuman(lvSecs)}</span>
-                </div>
-              </div>
-              <div style={{height:4,background:borderCol,borderRadius:2}}>
-                <div style={{height:"100%",width:`${lvPct}%`,background:currentLvColor,borderRadius:2,transition:"width .4s"}}/>
-              </div>
-              <div style={{display:"flex",justifyContent:"space-between",marginTop:5}}>
-                <span style={{fontSize:10,color:textMuted}}>{lvDone} of {allT.length} tasks</span>
-                <span style={{fontSize:10,color:textMuted}}>{fmtHuman(lvSecs)} logged</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {topTasks.length>0&&(
-        <div style={{marginBottom:16}}>
-          <div style={{fontSize:10,color:textMuted,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>Most time spent</div>
-          <div style={{background:bgCard,border:`1px solid ${borderCol}`,borderRadius:8,padding:"10px 12px",display:"flex",flexDirection:"column",gap:8}}>
-            {topTasks.map(t=>{
-              const barW=Math.round((t.secs/maxSecs)*100);
-              const originLv = customLevels.find(l=>l.categories.some(c=>c.tasks.some(tk=>tk.id===t.id)));
-              const lvColor= originLv ? (isDarkMode ? originLv.color : (originLv.id === 0 ? "#71717A" : originLv.color)) : "#6D28D9";
-              return(
-                <div key={t.id}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                    <span style={{fontSize:11,color:done[t.id]?textMuted:textPrimary,textDecoration:done[t.id]?"line-through":"none",maxWidth:"75%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.name}</span>
-                    <span style={{fontSize:11,color:textSecondary,fontVariantNumeric:"tabular-nums"}}>{fmtHuman(t.secs)}</span>
-                  </div>
-                  <div style={{height:3,background:borderCol,borderRadius:2}}>
-                    <div style={{height:"100%",width:`${barW}%`,background:lvColor+"99",borderRadius:2}}/>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      <div style={{background:bgCard,border:`1px solid ${borderCol}`,borderRadius:8,padding:"12px 14px"}}>
-        <div style={{fontSize:10,color:textMuted,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>Total</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          {[["Total tasks",allTasksList.length],["Completed",allTasksList.filter(t=>done[t.id]).length],["Time logged",fmtHuman(totalSecs)],["XP earned",allTasksList.filter(t=>done[t.id]).length*100]].map(([k,v])=>(
-            <div key={k} style={{background:bgSubCard,border:`1px solid ${borderCol}`,borderRadius:6,padding:"8px 10px"}}>
-              <div style={{fontSize:10,color:textMuted,marginBottom:2}}>{k}</div>
-              <div style={{fontSize:15,fontWeight:500,color:textPrimary}}>{v}</div>
-            </div>
-          ))}
-        </div>
+function LoginScreen({ onLogin }) {
+  return (
+    <div style={{ background:"#080808", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Azeret Mono,monospace", padding:"2rem" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@300;400;500;600&display=swap');`}</style>
+      <div style={{ maxWidth:320, width:"100%", textAlign:"center" }}>
+        <div style={{ fontSize:9, color:"#222", letterSpacing:"0.16em", marginBottom:20 }}>PERSONAL PROGRESS TRACKER</div>
+        <div style={{ fontSize:34, fontWeight:600, color:"#E8E6E1", marginBottom:8, letterSpacing:"-0.04em" }}>track<span style={{ color:"#3B82F6" }}>.</span>it</div>
+        <div style={{ fontSize:12, color:"#2A2A2A", marginBottom:48, lineHeight:1.9 }}>Track anything.<br/>Careers. Skills. Habits. Goals.</div>
+        <button onClick={onLogin}
+          style={{ width:"100%", padding:"13px 20px", background:"#0D0D0D", border:"1px solid #1E1E1E", borderRadius:10, color:"#E8E6E1", fontSize:12, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"center", gap:12 }}>
+          <svg width="16" height="16" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+          Continue with Google
+        </button>
+        <div style={{ marginTop:16, fontSize:10, color:"#1E1E1E" }}>Private · synced · accessible from any device</div>
       </div>
     </div>
   );

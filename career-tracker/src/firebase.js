@@ -52,6 +52,7 @@ updatedAt: Date.now()
 );
 } catch (err) {
 console.error("SAVE ERROR:", err);
+throw err;
 }
 }
 

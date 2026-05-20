@@ -20,14 +20,13 @@ const signIn = () => signInWithPopup(auth, gProvider);
 const logOut = () => signOut(auth);
 const onAuth = (cb) => onAuthStateChanged(auth, cb);
 
-// Firestore cannot handle deep nested arrays reliably.
-// We serialize the entire data to a JSON string and store it as one field.
+// Stores data securely as a single stringified field to avoid nesting issues
 async function saveData(uid, data) {
   await setDoc(doc(db, "trackerv3", uid), { payload: JSON.stringify(data), ts: Date.now() });
 }
 
 async function loadData(uid) {
-  // 1. Try latest collection first (JSON payload format)
+  // 1. Try latest collection (JSON payload format)
   let snap = await getDoc(doc(db, "trackerv3", uid));
   if (snap.exists() && snap.data().payload) {
     return JSON.parse(snap.data().payload);
@@ -38,8 +37,7 @@ async function loadData(uid) {
   if (snap.exists()) {
     const d = snap.data();
     if (d && d.categories && Array.isArray(d.categories) && d.categories.length > 0) {
-      // migrate: save to new collection immediately
-      await setDoc(doc(db, "trackerv3", uid), { payload: JSON.stringify(d), ts: Date.now() });
+      await saveData(uid, d);
       return d;
     }
   }
@@ -49,10 +47,9 @@ async function loadData(uid) {
   if (snap.exists()) {
     const d = snap.data();
     if (d && d.categories && Array.isArray(d.categories) && d.categories.length > 0) {
-      await setDoc(doc(db, "trackerv3", uid), { payload: JSON.stringify(d), ts: Date.now() });
+      await saveData(uid, d);
       return d;
     }
-    // old format had done/times/openLv flat structure - cannot migrate, return null
   }
 
   return null;
@@ -173,13 +170,13 @@ export default function App() {
     return () => clearInterval(intervalRef.current);
   }, [activeTimer]);
 
-  const persist = useCallback((d) => {
-    if (!user) return;
+  const persist = useCallback((dataToSave) => {
+    if (!user || !dataToSave) return;
     if (saveRef.current) clearTimeout(saveRef.current);
     setSyncStatus("saving");
     saveRef.current = setTimeout(async () => {
       try {
-        await saveData(user.uid, d);
+        await saveData(user.uid, dataToSave);
         setSyncStatus("saved");
         setTimeout(() => setSyncStatus("idle"), 2000);
       } catch (e) {
@@ -197,22 +194,8 @@ export default function App() {
     });
   }, [persist]);
 
-  const stopActiveTimer = useCallback((targetId, currentData) => {
-    if (!timerRef.current.id) return currentData;
-    const secs = Math.floor((Date.now() - timerRef.current.start) / 1000);
-    const tid = timerRef.current.id;
-    timerRef.current = { id: null, start: null };
-    setActiveTimer(null);
-    const next = JSON.parse(JSON.stringify(currentData));
-    next.categories.forEach(c => c.levels.forEach(l => l.tasks.forEach(t => {
-      if (t.id === tid) t.time = (t.time || 0) + secs;
-    })));
-    return next;
-  }, []);
-
   const startStop = useCallback((taskId) => {
     if (timerRef.current.id === taskId) {
-      // stop
       const secs = Math.floor((Date.now() - timerRef.current.start) / 1000);
       timerRef.current = { id: null, start: null };
       setActiveTimer(null);
@@ -223,7 +206,6 @@ export default function App() {
         return d;
       });
     } else {
-      // save previous if any
       if (timerRef.current.id) {
         const prevId = timerRef.current.id;
         const secs = Math.floor((Date.now() - timerRef.current.start) / 1000);
@@ -493,7 +475,8 @@ function ManagePage({ data, update, setPage }) {
   );
 }
 
-function StatsPage({ data, activeTimer, getLive }) {
+// Fixed mapping to utilize top-level dynamic categories schema
+function StatsPage({ data, getLive }) {
   const allTasks = data.categories.flatMap(c => c.levels.flatMap(l => l.tasks.map(t => ({ ...t, catName:c.name, catColor:c.color, liveTime:getLive(t.id) }))));
   const totalDone = allTasks.filter(t => t.done).length;
   const totalSecs = allTasks.reduce((a, t) => a + t.liveTime, 0);
@@ -581,17 +564,16 @@ function AddInline({ placeholder, onAdd, color, big }) {
 
 function Splash({ text }) {
   return (
-    <div style={{ background:"#080808", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Azeret Mono,monospace", color:"#333", fontSize:12 }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400&display=swap');`}</style>
+    <div style={{ background:"#080808", minHeight:"100vh", display:"flex", alignItems:"center", justifyIntersection:"center", fontFamily:"Azeret Mono,monospace", color:"#333", fontSize:12, justifyContent:"center" }}>
       {text}
     </div>
   );
 }
 
+// Self-contained login configuration component
 function LoginScreen({ onLogin }) {
   return (
     <div style={{ background:"#080808", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Azeret Mono,monospace", padding:"2rem" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@300;400;500;600&display=swap');`}</style>
       <div style={{ maxWidth:320, width:"100%", textAlign:"center" }}>
         <div style={{ fontSize:9, color:"#222", letterSpacing:"0.16em", marginBottom:20 }}>PERSONAL PROGRESS TRACKER</div>
         <div style={{ fontSize:34, fontWeight:600, color:"#E8E6E1", marginBottom:8, letterSpacing:"-0.04em" }}>track<span style={{ color:"#3B82F6" }}>.</span>it</div>

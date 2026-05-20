@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 import {
-auth,
 signInWithGoogle as signIn,
 logOut,
 onAuth,

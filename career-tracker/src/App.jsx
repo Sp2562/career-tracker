@@ -135,9 +135,10 @@ export default function App() {
         setSync("saved");
         setTimeout(() => setSync("idle"), 2000);
       } catch (e) {
-        console.error("Save failed:", e);
-        setSync("error");
-        setTimeout(() => setSync("idle"), 3000);
+        const msg = e?.code || e?.message || String(e);
+        console.error("Save failed — code:", e?.code, "message:", e?.message, "full:", e);
+        setSync("err:" + msg.slice(0, 40));
+        setTimeout(() => setSync("idle"), 6000);
       }
     }, 500);
   }, []); // no dependencies — userRef is always current

@@ -90,10 +90,12 @@ export default function App() {
   const timerRef = useRef({ id: null, start: null });
   const intervalRef = useRef(null);
   const saveRef = useRef(null);
+  const userRef = useRef(null); // always holds current user without stale closure
 
   // auth + load
   useEffect(() => {
     return onAuth(async (u) => {
+      userRef.current = u; // update ref immediately so persist always sees latest user
       setUser(u);
       if (u) {
         try {
@@ -119,22 +121,26 @@ export default function App() {
     return () => clearInterval(intervalRef.current);
   }, [activeTimer]);
 
-  // persist — saves entire data as JSON string so Firebase never corrupts nested arrays
+  // persist — uses userRef so it never has a stale user reference
   const persist = useCallback((next) => {
-    if (!user) return;
+    const u = userRef.current;
+    if (!u) return; // not logged in yet
     if (saveRef.current) clearTimeout(saveRef.current);
     setSync("saving");
+    // snapshot the data NOW before the timeout fires
+    const snapshot = JSON.parse(JSON.stringify(next));
     saveRef.current = setTimeout(async () => {
       try {
-        await saveData(user.uid, next);
+        await saveData(u.uid, snapshot);
         setSync("saved");
         setTimeout(() => setSync("idle"), 2000);
       } catch (e) {
+        console.error("Save failed:", e);
         setSync("error");
         setTimeout(() => setSync("idle"), 3000);
       }
     }, 500);
-  }, [user]);
+  }, []); // no dependencies — userRef is always current
 
   const update = useCallback((fn) => {
     setData(prev => {
